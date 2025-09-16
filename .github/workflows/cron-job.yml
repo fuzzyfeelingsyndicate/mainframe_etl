@@ -2,8 +2,8 @@ name: Run ETL Job
 
 on:
   schedule:
-    - cron: "*/10 * * * *"   # runs every 10 minutes
-  workflow_dispatch:         # lets you trigger manually from GitHub UI
+    - cron: "*/60 * * * *"   
+  workflow_dispatch:        
 
 jobs:
   run-script:
