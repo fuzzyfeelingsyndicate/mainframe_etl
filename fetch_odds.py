@@ -16,11 +16,11 @@ def main(id):
     cur = conn.cursor()
 
     cur.execute('''insert into "testTable" (id, name) 
-    values(%s, %s)''', (id_random, f'test{id_random}'))
+    values(%s, %s)''', (id, f'test{id}'))
 
     conn.commit()
     cur.close()
     conn.close()
 
 if __name__ == "__main__":
-    main()
+    main(id_random)
