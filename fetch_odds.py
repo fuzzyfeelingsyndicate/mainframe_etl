@@ -1,20 +1,11 @@
 import os
 import psycopg2
+import random 
 
-'''try:
-    conn = psycopg2.connect(
-        host=os.getenv("SUPABASE_HOST"),
-        dbname=os.getenv("SUPABASE_DB"),
-        user=os.getenv("SUPABASE_USER"),
-        password=os.getenv("SUPABASE_PASS"),
-        port=6543
-    )
-    print("✅ Connection successful")
-    conn.close()
-except Exception as e:
-    print("❌ Connection failed:", e)'''
+id_random = random.randint(1,10000)
 
-def main():
+
+def main(id):
     conn = psycopg2.connect(
         host=os.getenv("SUPABASE_HOST"),
         dbname=os.getenv("SUPABASE_DB"),
@@ -24,7 +15,8 @@ def main():
     )
     cur = conn.cursor()
 
-    cur.execute('select * from "testTable"')
+    cur.execute('''insert into "testTable" (id, name) 
+    values(%s, %s)''', (id_random, f'test{id_random}'))
 
     conn.commit()
     cur.close()
