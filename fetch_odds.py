@@ -7,7 +7,7 @@ try:
         dbname=os.getenv("SUPABASE_DB"),
         user=os.getenv("SUPABASE_USER"),
         password=os.getenv("SUPABASE_PASS"),
-        port=5432
+        port=6543
     )
     print("✅ Connection successful")
     conn.close()
