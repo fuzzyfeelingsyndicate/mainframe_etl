@@ -1,7 +1,7 @@
 import os
 import psycopg2
 
-try:
+'''try:
     conn = psycopg2.connect(
         host=os.getenv("SUPABASE_HOST"),
         dbname=os.getenv("SUPABASE_DB"),
@@ -12,9 +12,9 @@ try:
     print("✅ Connection successful")
     conn.close()
 except Exception as e:
-    print("❌ Connection failed:", e)
+    print("❌ Connection failed:", e)'''
 
-'''def main():
+def main():
     conn = psycopg2.connect(
         host=os.getenv("SUPABASE_HOST"),
         dbname=os.getenv("SUPABASE_DB"),
