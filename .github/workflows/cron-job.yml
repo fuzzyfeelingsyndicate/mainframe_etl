@@ -29,5 +29,7 @@ jobs:
           SUPABASE_PASS: ${{ secrets.SUPABASE_PASS }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+
           
         run: python fetch_odds.py
