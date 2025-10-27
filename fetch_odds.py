@@ -75,6 +75,10 @@ def upsert_event(events):
 # -----------------------------
 # Market upsert
 # -----------------------------
+from datetime import datetime
+import requests
+import os
+
 def upsert_market(event_id, line_id, period_number, market_type, parameter):
     data = {
         "event_id": event_id,
@@ -85,12 +89,25 @@ def upsert_market(event_id, line_id, period_number, market_type, parameter):
         "created_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
     }
 
-    result = supabase.table("markets").upsert(
-        data,
-        on_conflict="markets_unique"
-    ).execute()
+    existing = (
+        supabase.table("markets")
+        .select("market_id")
+        .eq("event_id", event_id)
+        .eq("line_id", line_id)
+        .eq("market_type", market_type)
+        .eq("parameter", parameter)
+        .execute()
+    )
 
-    return result.data[0]["market_id"] if result.data else None
+    if existing.data:
+        market_id = existing.data[0]["market_id"]
+        supabase.table("markets").update(data).eq("market_id", market_id).execute()
+    else:
+        result = supabase.table("markets").insert(data).execute()
+        market_id = result.data[0]["market_id"] if result.data else None
+
+    return market_id
+
 
 
 # -----------------------------
