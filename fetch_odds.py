@@ -87,7 +87,7 @@ def upsert_market(event_id, line_id, period_number, market_type, parameter):
 
     result = supabase.table("markets").upsert(
         data,
-        on_conflict=["event_id", "line_id", "market_type", "parameter"]
+        on_conflict="markets_unique"
     ).execute()
 
     return result.data[0]["market_id"] if result.data else None
