@@ -90,19 +90,8 @@ def upsert_market(event_id, line_id, period_number, market_type, parameter):
         on_conflict=["event_id", "line_id", "market_type", "parameter"]
     ).execute()
 
-    if result.data:
-        return result.data[0]["market_id"]
-    else:
-        existing = (
-            supabase.table("markets")
-            .select("market_id")
-            .eq("event_id", event_id)
-            .eq("line_id", line_id)
-            .eq("market_type", market_type)
-            .eq("parameter", parameter)
-            .execute()
-        )
-        return existing.data[0]["market_id"] if existing.data else None
+    return result.data[0]["market_id"] if result.data else None
+
 
 # -----------------------------
 # Insert odds
