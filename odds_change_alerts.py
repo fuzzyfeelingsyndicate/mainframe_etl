@@ -19,8 +19,7 @@ def post_to_slack(data):
         return
     
     if len(data) == 0:
-        payload ={"text" : "No recent change in the odds"}
-        requests.post(SLACK_WEBHOOK, json=payload)
+        print("empty data")
         return
     
     if isinstance(data, pd.DataFrame):
