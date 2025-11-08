@@ -1,4 +1,4 @@
-name: Run ETL Job
+name: Run clean events
 
 on:
   schedule:
