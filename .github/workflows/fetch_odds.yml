@@ -1,4 +1,4 @@
-name: Run ETL Job
+name: Run fetch odds
 
 on:
   schedule:
