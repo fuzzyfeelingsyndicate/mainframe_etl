@@ -30,7 +30,7 @@ def clean_markets():
         
         # Delete records where starts is in the past
         response = supabase.table("markets").delete().lt(
-            "starts", current_time
+            "created_at", current_time
         ).execute()
         
         print(f"✓ Cleaned markets: {len(response.data)} records deleted")
@@ -46,7 +46,7 @@ def clean_events():
         
         # Delete records where starts is in the past
         response = supabase.table("events").delete().lt(
-            "starts", current_time
+            "created_at", current_time
         ).execute()
         
         print(f"✓ Cleaned events: {len(response.data)} records deleted")
