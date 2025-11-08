@@ -32,4 +32,4 @@ jobs:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
 
           
-        run: python odds_change_alerts.py
+        run: python clean_events.py
