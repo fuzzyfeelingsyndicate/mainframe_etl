@@ -1,7 +1,6 @@
 pandas==2.3.2
 requests==2.32.3
+supabase-py==2.2.4
 python-dateutil==2.9.0.post0
 python-dotenv==1.0.1
 psycopg2-binary==2.9.9
-supabase==2.22.0
-supabase-auth==0.2.0
