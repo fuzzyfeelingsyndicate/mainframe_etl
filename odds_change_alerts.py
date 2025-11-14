@@ -23,8 +23,32 @@ def post_to_slack(data):
         print("empty data")
         return
     
+    # If data is a DataFrame, format row by row
     if isinstance(data, pd.DataFrame):
-        message = f"```\n{tabulate(data, headers='keys', tablefmt='grid')}\n```"
+        messages = []
+        for i in range(len(data)):
+            row = data.iloc[i]
+            event_id = row.get('event_id', '')
+            league_name = row.get('league_name', '')
+            home_team = row.get('home_team', '')
+            away_team = row.get('away_team', '')
+            
+            # Use home_total_move and away_total_move instead of no_vig_diff
+            home_move = row.get('home_total_move', 0)
+            away_move = row.get('away_total_move', 0)
+
+            msg = (
+                f"Event ID: {event_id}\n"
+                f"League: {league_name}\n"
+                f"Home: {home_team}\n"
+                f"Away: {away_team}\n"
+                f"Home Move: {home_move:.2f}%\n"
+                f"Away Move: {away_move:.2f}%\n"
+                "-----------------------------"
+            )
+            messages.append(msg)
+
+        message = "\n".join(messages)
     else:
         message = str(data)
     
@@ -32,6 +56,7 @@ def post_to_slack(data):
     resp = requests.post(SLACK_WEBHOOK, json=payload)
     if resp.status_code != 200:
         print("Slack post failed:", resp.status_code, resp.text)
+
 
 # -----------------------------
 # VECTORIZED NO-VIG FUNCTION
