@@ -34,21 +34,32 @@ def post_to_slack(data):
 
 
 
-def find_value_corrected(row):
-    overound_cal = round(100 / (100 / row['price_home'] + 100 / row['price_away'] + 100 / row['price_draw'])*100, 2)
-    overound =  (100 / row['price_home']) + (100 / row['price_draw']) + (100 / row['price_away'])
-    no_vig = (overound_cal / row['price_home']) + (overound_cal / row['price_draw']) + (overound_cal / row['price_away'])
-    home_no_vig = round((overound_cal / row['price_home']), 2)
-    draw_no_vig = round(overound_cal / row['price_draw'] ,2)
-    away_no_vig = round(overound_cal / row['price_away'], 2)
+def find_value_corrected_vectorized(df):
+    ph = pd.to_numeric(df['price_home'], errors='coerce')
+    pa = pd.to_numeric(df['price_away'], errors='coerce')
+    pd_ = pd.to_numeric(df['price_draw'], errors='coerce')
 
-    return pd.Series({
-        'overround': overound,
-        'no_vig': no_vig,
-        'home_no_vig' : home_no_vig,
-        'draw_no_vig' : draw_no_vig,
-        'away_no_vig' : away_no_vig
-    })
+    valid = ph.notna() & pa.notna() & pd_.notna()
+
+    res = pd.DataFrame(index=df.index, columns=[
+        'overround','no_vig','home_no_vig','draw_no_vig','away_no_vig'
+    ])
+
+    overround = 100/ph + 100/pd_ + 100/pa
+    res.loc[valid, 'overround'] = overround[valid]
+
+    over_cal = 100 / (100/ph + 100/pa + 100/pd_) * 100
+
+    h_nv = over_cal / ph
+    d_nv = over_cal / pd_
+    a_nv = over_cal / pa
+
+    res.loc[valid, 'home_no_vig'] = h_nv[valid].round(2)
+    res.loc[valid, 'draw_no_vig'] = d_nv[valid].round(2)
+    res.loc[valid, 'away_no_vig'] = a_nv[valid].round(2)
+    res.loc[valid, 'no_vig'] = (h_nv + d_nv + a_nv)[valid]
+
+    return res
 
 
 def check_odds(timedel = 2):
@@ -65,32 +76,77 @@ def check_odds(timedel = 2):
          post_to_slack(odds_history)
          return
      else:
-         match_winner_odds_home = odds_history[odds_history['side']=='home'][['market_id', 'price', 'max_limit', 'pulled_at']]
-         match_winner_odds_away = odds_history[odds_history['side']=='away'][['market_id', 'price']]
-         match_winner_odds_draw = odds_history[odds_history['side']=='draw'][['market_id', 'price']]
+        home = odds_history[odds_history['side']=='home'][['market_id','price','max_limit','pulled_at']]
+        away = odds_history[odds_history['side']=='away'][['market_id','price']].rename(columns={'price':'price_away'})
+        draw = odds_history[odds_history['side']=='draw'][['market_id','price']].rename(columns={'price':'price_draw'})
 
-         homeXaway = match_winner_odds_home.merge(match_winner_odds_away, suffixes=('_home', '_away'),how = 'left', on='market_id')
-         match_winner =  homeXaway.merge(match_winner_odds_draw, how = 'left', on='market_id').rename(
-             columns={'price':'price_draw'})[['market_id','price_home','price_draw','price_away','max_limit','pulled_at']]
-         
-         match_winner[['overround', 'no_vig' , 'home_no_vig', 'draw_no_vig', 'away_no_vig']] = match_winner.apply(find_value_corrected, axis=1)
-         Ix2 = match_winner.merge(markets[['market_id', 'event_id']].merge(events, how='left', on='event_id'),
-                   how='left', on='market_id')[['event_id', 'league_name', 'starts', 'price_home', 'price_draw', 'price_away', 'max_limit', 'overround', 'no_vig', 'home_no_vig', 'draw_no_vig', 'away_no_vig', 'market_id', 'pulled_at']]
-         
-         Ix2.sort_values( by=['event_id', 'pulled_at'], inplace = True, ascending = [True, True])
+        match_winner = (
+            home.rename(columns={'price':'price_home'})
+            .merge(away, on='market_id', how='left')
+            .merge(draw, on='market_id', how='left')
+            [['market_id','price_home','price_draw','price_away','max_limit','pulled_at']]
+        )
 
-         Ix2['no_vig_diff'] =  Ix2.groupby('event_id')['home_no_vig'].diff()
-
-         Ix2.sort_values(by = ['event_id', 'pulled_at'], inplace = True, ascending = [True, False])
-
-         result_df = Ix2[['event_id', 'league_name', 'starts', 'home_no_vig', 'draw_no_vig', 'away_no_vig', 'no_vig_diff', 'pulled_at']]
-         result_df['no_vig_diff'] = result_df['no_vig_diff'].fillna(0)
-         result_df = result_df[(result_df['no_vig_diff']<0) & result_df['no_vig_diff']>0]
-
-         supabase.table('match_winner').delete().neq('event_id', 0).execute()         
-         supabase.table('match_winner').insert(result_df.to_dict('records')).execute()
-         post_to_slack(result_df)
-         return 
+        match_winner[['overround','no_vig','home_no_vig','draw_no_vig','away_no_vig']] = \
+            find_value_corrected_vectorized(match_winner)
 
 
-check_odds(timedel = 2)
+        Ix2 = (
+            match_winner
+            .merge(markets[['market_id','event_id']], on='market_id')
+            .merge(events, on='event_id')
+            .sort_values(['event_id','pulled_at'])
+
+        first_last = Ix2.groupby('event_id').agg(
+            first_home=('home_no_vig','first'),
+            last_home=('home_no_vig','last'),
+            first_away=('away_no_vig','first'),
+            last_away=('away_no_vig','last')
+        )
+
+        first_last['home_total_move'] = first_last['last_home'] - first_last['first_home']
+        first_last['away_total_move'] = first_last['last_away'] - first_last['first_away']
+
+        man_ml = first_last[
+            (first_last['home_total_move'].abs() > 2) |
+            (first_last['away_total_move'].abs() > 2)
+        ].index
+
+        subset = Ix2[Ix2['event_id'].isin(man_ml)]
+        idx = subset.groupby('event_id')['pulled_at'].agg(['idxmin','idxmax'])
+        first_last_rows = subset.loc[idx['idxmin'].tolist() + idx['idxmax'].tolist()]
+
+        result = first_last_rows.merge(
+            first_last.loc[man_ml][['home_total_move','away_total_move']].reset_index(),
+            on='event_id'
+        )
+
+        result = result.sort_values(['event_id','pulled_at'])
+
+        final = (
+            result.groupby('event_id')
+            .agg({
+                'league_name':'first',
+                'home_team':'first',
+                'away_team':'first',
+                'starts':'first',
+                'price_home':lambda x: f"{x.iloc[0]} -> {x.iloc[-1]}",
+                'price_draw':lambda x: f"{x.iloc[0]} -> {x.iloc[-1]}",
+                'price_away':lambda x: f"{x.iloc[0]} -> {x.iloc[-1]}",
+                'home_total_move':'first',
+                'away_total_move':'first',
+                'pulled_at':'last'
+            })
+            .reset_index()
+        )
+
+        if final.empty:
+            print('no vig movements')
+        else:
+            supabase.table('match_winner').delete().neq('event_id', 0).execute()         
+            supabase.table('match_winner').insert(result_df.to_dict('records')).execute()
+            post_to_slack(result_df)
+            return            
+
+
+check_odds(timedel = 30)
