@@ -1,17 +1,18 @@
 import os
 import pandas as pd
 import requests
-from supabase import create_client,  client
+from supabase import create_client, client
 from datetime import datetime, timedelta
 from tabulate import tabulate
 
+# -----------------------------
+# SUPABASE & SLACK CONFIG
+# -----------------------------
 url = os.getenv("SUPABASE_URL")
 key = os.getenv("SUPABASE_KEY")
-
 supabase: client = create_client(url, key)
 
 SLACK_WEBHOOK = os.getenv('SLACK_WEBHOOK')
-
 
 def post_to_slack(data):
     if not SLACK_WEBHOOK:
@@ -32,8 +33,9 @@ def post_to_slack(data):
     if resp.status_code != 200:
         print("Slack post failed:", resp.status_code, resp.text)
 
-
-
+# -----------------------------
+# VECTORIZED NO-VIG FUNCTION
+# -----------------------------
 def find_value_corrected_vectorized(df):
     ph = pd.to_numeric(df['price_home'], errors='coerce')
     pa = pd.to_numeric(df['price_away'], errors='coerce')
@@ -61,92 +63,125 @@ def find_value_corrected_vectorized(df):
 
     return res
 
+# -----------------------------
+# MAIN FUNCTION
+# -----------------------------
+def check_odds(timedel=2):
+    cutoff_date = datetime.now() - timedelta(hours=timedel)
+    
+    # Fetch data from Supabase
+    events = pd.DataFrame(supabase.table('events').select('*').execute().data)
+    markets = pd.DataFrame(supabase.table('markets').select('*').execute().data)
+    odds_history = pd.DataFrame(
+        supabase.table('odds_history')
+        .select('*')
+        .gt('pulled_at', cutoff_date.isoformat())
+        .execute().data
+    )
 
-def check_odds(timedel = 2):
-     url = os.getenv("SUPABASE_URL")
-     key = os.getenv("SUPABASE_KEY")
-     supabase: client = create_client(url, key)
-     cutoff_date = datetime.now() - timedelta(hours=timedel)
-     
-     events = pd.DataFrame(supabase.table('events').select('*').execute().data)
-     markets = pd.DataFrame(supabase.table('markets').select('*').execute().data)
-     odds_history = pd.DataFrame(supabase.table('odds_history').select('*').gt('pulled_at', cutoff_date.isoformat()).execute().data)
+    if odds_history.empty:
+        post_to_slack(odds_history)
+        return
 
-     if odds_history.empty:
-         post_to_slack(odds_history)
-         return
-     else:
-        home = odds_history[odds_history['side']=='home'][['market_id','price','max_limit','pulled_at']]
-        away = odds_history[odds_history['side']=='away'][['market_id','price']].rename(columns={'price':'price_away'})
-        draw = odds_history[odds_history['side']=='draw'][['market_id','price']].rename(columns={'price':'price_draw'})
+    # -----------------------------
+    # BUILD MATCH WINNER DF
+    # -----------------------------
+    home = odds_history[odds_history['side']=='home'][['market_id','price','max_limit','pulled_at']]
+    away = odds_history[odds_history['side']=='away'][['market_id','price']].rename(columns={'price':'price_away'})
+    draw = odds_history[odds_history['side']=='draw'][['market_id','price']].rename(columns={'price':'price_draw'})
 
-        match_winner = (
-            home.rename(columns={'price':'price_home'})
-            .merge(away, on='market_id', how='left')
-            .merge(draw, on='market_id', how='left')
-            [['market_id','price_home','price_draw','price_away','max_limit','pulled_at']]
-        )
+    match_winner = (
+        home.rename(columns={'price':'price_home'})
+        .merge(away, on='market_id', how='left')
+        .merge(draw, on='market_id', how='left')
+        [['market_id','price_home','price_draw','price_away','max_limit','pulled_at']]
+    )
 
-        match_winner[['overround','no_vig','home_no_vig','draw_no_vig','away_no_vig']] = \
-            find_value_corrected_vectorized(match_winner)
+    # Calculate no-vig values
+    match_winner[['overround','no_vig','home_no_vig','draw_no_vig','away_no_vig']] = \
+        find_value_corrected_vectorized(match_winner)
 
+    # -----------------------------
+    # MERGE WITH EVENTS AND MARKETS
+    # -----------------------------
+    Ix2 = (
+        match_winner
+        .merge(markets[['market_id','event_id']], on='market_id')
+        .merge(events, on='event_id')
+        .sort_values(['event_id','pulled_at'])
+    )
 
-        Ix2 = (
-            match_winner
-            .merge(markets[['market_id','event_id']], on='market_id')
-            .merge(events, on='event_id')
-            .sort_values(['event_id','pulled_at'])
+    # -----------------------------
+    # NET MOVEMENT CALCULATION (FINAL - INITIAL)
+    # -----------------------------
+    first_last = Ix2.groupby('event_id').agg(
+        first_home=('home_no_vig','first'),
+        last_home=('home_no_vig','last'),
+        first_away=('away_no_vig','first'),
+        last_away=('away_no_vig','last')
+    )
 
-        first_last = Ix2.groupby('event_id').agg(
-            first_home=('home_no_vig','first'),
-            last_home=('home_no_vig','last'),
-            first_away=('away_no_vig','first'),
-            last_away=('away_no_vig','last')
-        )
+    first_last['home_total_move'] = first_last['last_home'] - first_last['first_home']
+    first_last['away_total_move'] = first_last['last_away'] - first_last['first_away']
 
-        first_last['home_total_move'] = first_last['last_home'] - first_last['first_home']
-        first_last['away_total_move'] = first_last['last_away'] - first_last['first_away']
+    # Filter events with net movement > 2%
+    man_ml = first_last[
+        (first_last['home_total_move'].abs() > 2) |
+        (first_last['away_total_move'].abs() > 2)
+    ].index
 
-        man_ml = first_last[
-            (first_last['home_total_move'].abs() > 2) |
-            (first_last['away_total_move'].abs() > 2)
-        ].index
+    # -----------------------------
+    # SELECT FIRST + LAST ROWS PER EVENT
+    # -----------------------------
+    subset = Ix2[Ix2['event_id'].isin(man_ml)]
+    idx = subset.groupby('event_id')['pulled_at'].agg(['idxmin','idxmax'])
+    first_last_rows = subset.loc[idx['idxmin'].tolist() + idx['idxmax'].tolist()]
 
-        subset = Ix2[Ix2['event_id'].isin(man_ml)]
-        idx = subset.groupby('event_id')['pulled_at'].agg(['idxmin','idxmax'])
-        first_last_rows = subset.loc[idx['idxmin'].tolist() + idx['idxmax'].tolist()]
+    # Merge net movement totals
+    result = first_last_rows.merge(
+        first_last.loc[man_ml][['home_total_move','away_total_move']].reset_index(),
+        on='event_id'
+    )
 
-        result = first_last_rows.merge(
-            first_last.loc[man_ml][['home_total_move','away_total_move']].reset_index(),
-            on='event_id'
-        )
+    result = result.sort_values(['event_id','pulled_at'])
 
-        result = result.sort_values(['event_id','pulled_at'])
+    # -----------------------------
+    # FINAL AGGREGATED OUTPUT
+    # -----------------------------
+    final = (
+        result.groupby('event_id')
+        .agg({
+            'league_name':'first',
+            'home_team':'first',
+            'away_team':'first',
+            'starts':'first',
+            'price_home':lambda x: f"{x.iloc[0]} -> {x.iloc[-1]}",
+            'price_draw':lambda x: f"{x.iloc[0]} -> {x.iloc[-1]}",
+            'price_away':lambda x: f"{x.iloc[0]} -> {x.iloc[-1]}",
+            'home_total_move':'first',
+            'away_total_move':'first',
+            'pulled_at':'last'
+        })
+        .reset_index()
+    )
 
-        final = (
-            result.groupby('event_id')
-            .agg({
-                'league_name':'first',
-                'home_team':'first',
-                'away_team':'first',
-                'starts':'first',
-                'price_home':lambda x: f"{x.iloc[0]} -> {x.iloc[-1]}",
-                'price_draw':lambda x: f"{x.iloc[0]} -> {x.iloc[-1]}",
-                'price_away':lambda x: f"{x.iloc[0]} -> {x.iloc[-1]}",
-                'home_total_move':'first',
-                'away_total_move':'first',
-                'pulled_at':'last'
-            })
-            .reset_index()
-        )
+    # -----------------------------
+    # INSERT INTO SUPABASE AND POST TO SLACK
+    # -----------------------------
+    if final.empty:
+        print('No vig movements detected')
+    else:
+        # Delete previous rows
+        supabase.table('match_winner').delete().execute()         
+        
+        # Insert new data
+        supabase.table('match_winner').insert(final.to_dict('records')).execute()
+        
+        # Send to Slack
+        post_to_slack(final)
+        return
 
-        if final.empty:
-            print('no vig movements')
-        else:
-            supabase.table('match_winner').delete().neq('event_id', 0).execute()         
-            supabase.table('match_winner').insert(result_df.to_dict('records')).execute()
-            post_to_slack(result_df)
-            return            
-
-
-check_odds(timedel = 30)
+# -----------------------------
+# RUN THE FUNCTION
+# -----------------------------
+check_odds(timedel=30)
