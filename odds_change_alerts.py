@@ -165,19 +165,9 @@ def check_odds(timedel=2):
         .reset_index()
     )
 
-    # -----------------------------
-    # INSERT INTO SUPABASE AND POST TO SLACK
-    # -----------------------------
     if final.empty:
         print('No vig movements detected')
     else:
-        # Delete previous rows
-        supabase.table('match_winner').delete().execute()         
-        
-        # Insert new data
-        supabase.table('match_winner').insert(final.to_dict('records')).execute()
-        
-        # Send to Slack
         post_to_slack(final)
         return
 
