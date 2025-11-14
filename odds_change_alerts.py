@@ -199,4 +199,4 @@ def check_odds(timedel=2):
 # -----------------------------
 # RUN THE FUNCTION
 # -----------------------------
-check_odds(timedel=30)
+check_odds(timedel=48)
