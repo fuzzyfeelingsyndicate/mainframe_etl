@@ -49,7 +49,11 @@ def is_event_fresh(event_start_iso: str):
 # Upsert events
 # -----------------------------
 def upsert_event(events):
-    for event in events['events']:
+    event_list = events.get('events', [])
+    if not event_list:
+        return
+
+    for event in event_list:
         existing = (
             supabase.table("events")
             .select("event_id", "created_at")
@@ -73,7 +77,7 @@ def upsert_event(events):
             "created_at": created_at
         }).execute()
 
-        # Cache the start time for freshness checks
+        # Cache the event start time for freshness checks
         event_created[event["event_id"]] = datetime.fromisoformat(event["starts"]).astimezone(ZoneInfo("Europe/Berlin"))
 
         if is_new_event:
@@ -86,9 +90,8 @@ def upsert_event(events):
 def upsert_market(event, period):
     event_id = event["event_id"]
 
-    # Check freshness using event start time
-    event_start = event.get("starts")
-    if not is_event_fresh(event_start):
+    # Skip markets for old events
+    if not is_event_fresh(event.get("starts")):
         return None
 
     market_type = "money_line"
@@ -142,8 +145,6 @@ def insert_odds(market_id, side, price, max_limit=None):
         return
 
     now_cet = cet_now()
-
-    # Skip if event is older than 3 hours from start time
     if now_cet - event_start > timedelta(hours=3):
         return
 
@@ -173,11 +174,15 @@ def insert_odds(market_id, side, price, max_limit=None):
 # Process events from API
 # -----------------------------
 def process_event(events):
-    upsert_event(events)
+    event_list = events.get('events', [])
+    if not event_list:
+        print("No events returned by API")
+        return
 
-    for event in events['events']:
+    upsert_event({"events": event_list})
+
+    for event in event_list:
         for key, period in event.get('periods', {}).items():
-            # Only moneyline full-time (period_number = 0)
             if period.get("money_line") and period.get("number") == 0:
                 market_id = upsert_market(event, period)
                 if market_id is None:
