@@ -8,54 +8,45 @@ from supabase import create_client, client
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-
-url = "https://pinnacle-odds.p.rapidapi.com/kit/v1/markets"
-
-querystring = {"league_ids":"1835,1842,6417,201159","event_type":"prematch","sport_id":"1","is_have_odds":"true"}
-
-headers = {
-    "x-rapidapi-key": "67356f377fmsh90217b51616e9d8p11c494jsnf87faa9470db",
-    "x-rapidapi-host": "pinnacle-odds.p.rapidapi.com"
-}
-
-response = requests.get(url, headers=headers, params=querystring)
-event_list = response.json()
-
-event_created = {}
-market_event = {}
+# -----------------------------
+# Supabase setup
+# -----------------------------
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+supabase: client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # -----------------------------
 # Slack helper
 # -----------------------------
-SLACK_WEBHOOK = os.getenv('SLACK_WEBHOOK')
-
+SLACK_WEBHOOK = os.getenv("SLACK_WEBHOOK")
 def post_to_slack(message: str):
     if not SLACK_WEBHOOK:
-        print("No Slack webhook defined")
         return
     payload = {"text": message}
-    resp = requests.post(SLACK_WEBHOOK, json=payload)
-    if resp.status_code != 200:
-        print("Slack post failed:", resp.status_code, resp.text)
-
+    requests.post(SLACK_WEBHOOK, json=payload)
 
 # -----------------------------
-# Supabase connection
-# -----------------------------
-url = os.getenv("SUPABASE_URL")
-key = os.getenv("SUPABASE_KEY")
-supabase: client = create_client(url, key)
-
-
-# -----------------------------
-# CET now() helper
+# CET helper
 # -----------------------------
 def cet_now():
     return datetime.now(ZoneInfo("Europe/Berlin"))
 
+# -----------------------------
+# Global caches
+# -----------------------------
+event_created = {}  # event_id -> start_time (datetime CET)
+market_event = {}   # market_id -> event_id
 
 # -----------------------------
-# Event upsert (with CET timestamp)
+# Freshness check (3 hours) using event start time
+# -----------------------------
+def is_event_fresh(event_start_iso: str):
+    start_dt = datetime.fromisoformat(event_start_iso).astimezone(ZoneInfo("Europe/Berlin"))
+    now = cet_now()
+    return now - start_dt <= timedelta(hours=3)
+
+# -----------------------------
+# Upsert events
 # -----------------------------
 def upsert_event(events):
     for event in events['events']:
@@ -69,59 +60,37 @@ def upsert_event(events):
         is_new_event = not existing.data
         now_cet = cet_now()
 
-        if is_new_event:
-            # Insert event with CET created_at
-            supabase.table("events").insert({
-                "event_id": event["event_id"],
-                "sport_id": event["sport_id"],
-                "league_id": event["league_id"],
-                "league_name": event["league_name"],
-                "starts": event["starts"],
-                "home_team": event["home"],
-                "away_team": event["away"],
-                "created_at": now_cet.isoformat()
-            }).execute()
+        created_at = now_cet.isoformat() if is_new_event else existing.data[0]["created_at"]
 
+        supabase.table("events").upsert({
+            "event_id": event["event_id"],
+            "sport_id": event["sport_id"],
+            "league_id": event["league_id"],
+            "league_name": event["league_name"],
+            "starts": event["starts"],
+            "home_team": event["home"],
+            "away_team": event["away"],
+            "created_at": created_at
+        }).execute()
+
+        # Cache the start time for freshness checks
+        event_created[event["event_id"]] = datetime.fromisoformat(event["starts"]).astimezone(ZoneInfo("Europe/Berlin"))
+
+        if is_new_event:
             msg = f":sparkles: New event added: *{event['home']}* vs *{event['away']}* in *{event['league_name']}* — starts {event['starts']}"
             post_to_slack(msg)
 
-        else:
-            # Event exists → do not update created_at
-            supabase.table("events").update({
-                "sport_id": event["sport_id"],
-                "league_id": event["league_id"],
-                "league_name": event["league_name"],
-                "starts": event["starts"],
-                "home_team": event["home"],
-                "away_team": event["away"],
-            }).eq("event_id", event["event_id"]).execute()
-
-
 # -----------------------------
-# Market upsert
+# Upsert market
 # -----------------------------
 def upsert_market(event, period):
     event_id = event["event_id"]
 
-    # Fetch event to check created_at freshness
-    existing = (
-        supabase.table("events")
-        .select("created_at")
-        .eq("event_id", event_id)
-        .execute()
-    )
-
-    if not existing.data:
-        return None  # should not happen
-
-    event_created_at = datetime.fromisoformat(existing.data[0]["created_at"])
-    now_cet = cet_now()
-
-    # Skip if event older than 3 hours
-    if now_cet - event_created_at > timedelta(hours=3):
+    # Check freshness using event start time
+    event_start = event.get("starts")
+    if not is_event_fresh(event_start):
         return None
 
-    # Continue normally
     market_type = "money_line"
     parameter = 0
     line_id = period["line_id"]
@@ -153,34 +122,32 @@ def upsert_market(event, period):
         result = supabase.table("markets").insert(data).execute()
         market_id = result.data[0]["market_id"]
 
+    # Cache market -> event for odds
+    market_event[market_id] = event_id
     return market_id
 
-
 # -----------------------------
-# Insert odds (with 3-hour CET rule)
+# Insert odds
 # -----------------------------
-def insert_odds(market_id, side, price, max_limit):
-
+def insert_odds(market_id, side, price, max_limit=None):
     if market_id is None:
         return
 
-    # Get event_id from cache
     event_id = market_event.get(market_id)
     if not event_id:
         return
 
-    # Get event.created_at from cache
-    event_created_at = event_created.get(event_id)
-    if not event_created_at:
+    event_start = event_created.get(event_id)
+    if not event_start:
         return
 
     now_cet = cet_now()
 
-    # Skip if event older than 3 hours
-    if now_cet - event_created_at > timedelta(hours=3):
+    # Skip if event is older than 3 hours from start time
+    if now_cet - event_start > timedelta(hours=3):
         return
 
-    # Check if these odds already exist
+    # Check for existing identical odds
     existing = (
         supabase.table("odds_history")
         .select("*")
@@ -202,29 +169,38 @@ def insert_odds(market_id, side, price, max_limit):
             "pulled_at": now_cet.isoformat()
         }).execute()
 
-
 # -----------------------------
-# Process event
+# Process events from API
 # -----------------------------
 def process_event(events):
     upsert_event(events)
 
-    for event in events["events"]:
-        for key, period in event.get("periods", {}).items():
-
-            # Only process moneyline full-time
+    for event in events['events']:
+        for key, period in event.get('periods', {}).items():
+            # Only moneyline full-time (period_number = 0)
             if period.get("money_line") and period.get("number") == 0:
-
                 market_id = upsert_market(event, period)
-
                 if market_id is None:
-                    continue  # event too old → skip
-
+                    continue
                 for side, line in period["money_line"].items():
                     insert_odds(market_id, side, line, 0)
 
+# -----------------------------
+# Fetch events from Pinnacle API
+# -----------------------------
+def fetch_event_list():
+    url = "https://pinnacle-odds.p.rapidapi.com/kit/v1/markets"
+    querystring = {"league_ids":"1835,1842","event_type":"prematch","sport_id":"1","is_have_odds":"true"}
+    headers = {
+        "x-rapidapi-key": os.getenv("PINNACLE_KEY"),
+        "x-rapidapi-host": "pinnacle-odds.p.rapidapi.com"
+    }
+    response = requests.get(url, headers=headers, params=querystring)
+    return response.json()
 
 # -----------------------------
-# Run
+# Main
 # -----------------------------
-process_event(event_list)
+if __name__ == "__main__":
+    event_list = fetch_event_list()
+    process_event(event_list)
