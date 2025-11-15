@@ -162,21 +162,23 @@ def insert_odds(market_id, side, price, max_limit):
     if market_id is None:
         return
 
-    # Get event_created_at via JOIN
-    event_query = (
-        supabase.rpc("get_event_for_market", {"m_id": market_id}).execute()
-    )
-
-    if not event_query.data:
+    # Get event_id from cache
+    event_id = market_event.get(market_id)
+    if not event_id:
         return
 
-    event_created_at = datetime.fromisoformat(event_query.data[0]["created_at"])
+    # Get event.created_at from cache
+    event_created_at = event_created.get(event_id)
+    if not event_created_at:
+        return
+
     now_cet = cet_now()
 
-    # Skip if event is older than 3 hours
+    # Skip if event older than 3 hours
     if now_cet - event_created_at > timedelta(hours=3):
         return
 
+    # Check if these odds already exist
     existing = (
         supabase.table("odds_history")
         .select("*")
@@ -195,7 +197,7 @@ def insert_odds(market_id, side, price, max_limit):
             "side": side,
             "price": price,
             "max_limit": max_limit,
-            "pulled_at": cet_now().isoformat()
+            "pulled_at": now_cet.isoformat()
         }).execute()
 
 
