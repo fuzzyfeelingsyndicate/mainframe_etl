@@ -10,52 +10,64 @@ from datetime import datetime
 
 url = "https://pinnacle-odds.p.rapidapi.com/kit/v1/markets"
 
-querystring = {"league_ids":"1835,1842","event_type":"prematch","sport_id":"1","is_have_odds":"true"}
+querystring = {
+    "league_ids": "1835,1842",
+    "event_type": "prematch",
+    "sport_id": "1",
+    "is_have_odds": "true"
+}
 
 headers = {
-	"x-rapidapi-key": "67356f377fmsh90217b51616e9d8p11c494jsnf87faa9470db",
-	"x-rapidapi-host": "pinnacle-odds.p.rapidapi.com"
+    "x-rapidapi-key": "67356f377fmsh90217b51616e9d8p11c494jsnf87faa9470db",
+    "x-rapidapi-host": "pinnacle-odds.p.rapidapi.com"
 }
 
 response = requests.get(url, headers=headers, params=querystring)
 event_list = response.json()
 
-# -----------------------------
+# ---------------------------------------------------
 # Slack helper
-# -----------------------------
+# ---------------------------------------------------
 SLACK_WEBHOOK = os.getenv('SLACK_WEBHOOK')
 
 def post_to_slack(message: str):
     if not SLACK_WEBHOOK:
-        print("No Slack webhook defined")
         return
     payload = {"text": message}
-    resp = requests.post(SLACK_WEBHOOK, json=payload)
-    if resp.status_code != 200:
-        print("Slack post failed:", resp.status_code, resp.text)
+    requests.post(SLACK_WEBHOOK, json=payload)
 
-# -----------------------------
+# ---------------------------------------------------
 # Supabase connection
-# -----------------------------
+# ---------------------------------------------------
 url = os.getenv("SUPABASE_URL")
 key = os.getenv("SUPABASE_KEY")
 supabase: client = create_client(url, key)
 
-# -----------------------------
-# Event upsert
-# -----------------------------
+# ---------------------------------------------------
+# In-memory caches for fast lookups
+# ---------------------------------------------------
+event_created = {}     # event_id -> datetime
+market_event = {}      # market_id -> event_id
+
+# ---------------------------------------------------
+# Upsert event (always)
+# ---------------------------------------------------
 def upsert_event(events):
     for event in events['events']:
-        # Check if event already exists
+
         existing = (
             supabase.table("events")
-            .select("event_id")
+            .select("event_id, created_at")
             .eq("event_id", event["event_id"])
             .execute()
         )
 
-        is_new_event = not existing.data  # True if event doesn't exist
+        if existing.data:
+            created_at = existing.data[0]["created_at"]
+        else:
+            created_at = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
 
+        # Upsert event
         supabase.table("events").upsert({
             "event_id": event["event_id"],
             "sport_id": event["sport_id"],
@@ -64,18 +76,33 @@ def upsert_event(events):
             "starts": event["starts"],
             "home_team": event["home"],
             "away_team": event["away"],
-            "created_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+            "created_at": created_at
         }).execute()
 
-        # Notify Slack if new event
-        if is_new_event:
-            msg = f":sparkles: New event added: *{event['home']}* vs *{event['away']}* in *{event['league_name']}* — starts {event['starts']}"
+        # Cache created_at
+        event_created[event["event_id"]] = datetime.fromisoformat(created_at)
+
+        # Slack for new events
+        if not existing.data:
+            msg = (
+                f":sparkles: New event added: *{event['home']}* vs *{event['away']}* "
+                f"in *{event['league_name']}* — starts {event['starts']}"
+            )
             post_to_slack(msg)
 
-# -----------------------------
-# Market upsert
-# -----------------------------
+# ---------------------------------------------------
+# Upsert market (only if event is ≤ 3 hours old)
+# ---------------------------------------------------
 def upsert_market(event_id, line_id, period_number, market_type, parameter):
+
+    event_created_at = event_created.get(event_id)
+    if not event_created_at:
+        return None
+
+    # Skip old events
+    if datetime.utcnow() - event_created_at > timedelta(hours=3):
+        return None
+
     existing = (
         supabase.table("markets")
         .select("market_id")
@@ -92,7 +119,7 @@ def upsert_market(event_id, line_id, period_number, market_type, parameter):
         "period_number": period_number,
         "market_type": market_type,
         "parameter": parameter,
-        "created_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+        "created_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
     }
 
     if existing.data:
@@ -100,16 +127,41 @@ def upsert_market(event_id, line_id, period_number, market_type, parameter):
         supabase.table("markets").update(data).eq("market_id", market_id).execute()
     else:
         result = supabase.table("markets").insert(data).execute()
-        market_id = result.data[0]["market_id"] if result.data else None
+        market_id = result.data[0]["market_id"]
 
+    # Cache market -> event
+    market_event[market_id] = event_id
     return market_id
 
-# -----------------------------
-# Insert odds
-# -----------------------------
+# ---------------------------------------------------
+# Insert odds (only if event is ≤ 3 hours old)
+# ---------------------------------------------------
 def insert_odds(market_id, side, price, max_limit=None):
 
-    existing = supabase.table("odds_history").select("*").eq("market_id", market_id).eq("side", side).eq("price", price).eq("max_limit", max_limit).order("pulled_at", desc=True).limit(1) .execute()
+    event_id = market_event.get(market_id)
+    if not event_id:
+        return
+
+    event_created_at = event_created.get(event_id)
+    if not event_created_at:
+        return
+
+    # Skip old events silently
+    if datetime.utcnow() - event_created_at > timedelta(hours=3):
+        return
+
+    # Check if these odds already exist
+    existing = (
+        supabase.table("odds_history")
+        .select("*")
+        .eq("market_id", market_id)
+        .eq("side", side)
+        .eq("price", price)
+        .eq("max_limit", max_limit)
+        .order("pulled_at", desc=True)
+        .limit(1)
+        .execute()
+    )
 
     if not existing.data:
         supabase.table("odds_history").insert({
@@ -117,17 +169,21 @@ def insert_odds(market_id, side, price, max_limit=None):
             "side": side,
             "price": price,
             "max_limit": max_limit,
-            "pulled_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+            "pulled_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
         }).execute()
 
-# -----------------------------
-# Process event
-# -----------------------------
+# ---------------------------------------------------
+# Process events
+# ---------------------------------------------------
 def process_event(events):
     upsert_event(events)
+
     for event in events['events']:
         for key, period in event.get('periods', {}).items():
-            if period.get('money_line') is not None and period.get('number') == 0:
+
+            # Moneyline only (period number = 0)
+            if period.get('money_line') and period.get('number') == 0:
+
                 market_id = upsert_market(
                     event['event_id'],
                     period['line_id'],
@@ -135,13 +191,16 @@ def process_event(events):
                     "money_line",
                     0
                 )
-                for side, line in period.get('money_line', {}).items():
+
+                if market_id is None:
+                    continue  # Skip odds if market skipped
+
+                # Insert moneyline odds
+                for side, line in period['money_line'].items():
                     insert_odds(market_id, side, line, 0)
 
-# -----------------------------
-# Run
-# -----------------------------
 process_event(event_list)
+
 
 
 #1842
