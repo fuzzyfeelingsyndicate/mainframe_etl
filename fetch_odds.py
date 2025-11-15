@@ -21,6 +21,8 @@ headers = {
 response = requests.get(url, headers=headers, params=querystring)
 event_list = response.json()
 
+event_created = {}
+market_event = {}
 
 # -----------------------------
 # Slack helper
