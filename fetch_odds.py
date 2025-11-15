@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 url = "https://pinnacle-odds.p.rapidapi.com/kit/v1/markets"
 
-querystring = {"league_ids":"1835,1842","event_type":"prematch","sport_id":"1","is_have_odds":"true"}
+querystring = {"league_ids":"1835,1842,6417","event_type":"prematch","sport_id":"1","is_have_odds":"true"}
 
 headers = {
     "x-rapidapi-key": "67356f377fmsh90217b51616e9d8p11c494jsnf87faa9470db",
