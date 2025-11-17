@@ -1,97 +1,116 @@
 import os
-import psycopg2
-import random 
-import pandas as pd
-import json
 import requests
 from supabase import create_client, client
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-# -----------------------------
-# Supabase setup
-# -----------------------------
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-supabase: client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# -----------------------------
-# Slack helper
-# -----------------------------
-SLACK_WEBHOOK = os.getenv("SLACK_WEBHOOK")
-def post_to_slack(message: str):
-    if not SLACK_WEBHOOK:
-        return
-    payload = {"text": message}
-    requests.post(SLACK_WEBHOOK, json=payload)
-
-# -----------------------------
-# CET helper
-# -----------------------------
+# =============================================
+# CET time helper
+# =============================================
 def cet_now():
     return datetime.now(ZoneInfo("Europe/Berlin"))
 
-# -----------------------------
-# Global caches
-# -----------------------------
-event_created = {}  # event_id -> start_time (datetime CET)
-market_event = {}   # market_id -> event_id
 
-# -----------------------------
-# Freshness check (3 hours) using event start time
-# -----------------------------
-def is_event_fresh(event_start_iso: str):
-    start_dt = datetime.fromisoformat(event_start_iso).astimezone(ZoneInfo("Europe/Berlin"))
-    now = cet_now()
-    return now - start_dt <= timedelta(hours=3)
+# =============================================
+# GLOBAL CACHES
+# =============================================
+event_created = {}   # event_id -> created_at (datetime)
+market_event = {}    # market_id -> event_id
 
-# -----------------------------
-# Upsert events
-# -----------------------------
-def upsert_event(events):
-    event_list = events.get('events', [])
-    if not event_list:
+
+# =============================================
+# Slack helper
+# =============================================
+SLACK_WEBHOOK = os.getenv('SLACK_WEBHOOK')
+
+def post_to_slack(message: str):
+    if not SLACK_WEBHOOK:
+        print("No Slack webhook defined")
         return
+    requests.post(SLACK_WEBHOOK, json={"text": message})
 
-    for event in event_list:
+
+# =============================================
+# Supabase setup
+# =============================================
+url = os.getenv("SUPABASE_URL")
+key = os.getenv("SUPABASE_KEY")
+supabase: client = create_client(url, key)
+
+
+# =============================================
+# Upsert event (with CET created_at)
+# =============================================
+def upsert_event(events):
+
+    for event in events['events']:
+
+        event_id = event["event_id"]
+
+        # check if already exists
         existing = (
             supabase.table("events")
             .select("event_id", "created_at")
-            .eq("event_id", event["event_id"])
+            .eq("event_id", event_id)
             .execute()
         )
 
-        is_new_event = not existing.data
-        now_cet = cet_now()
+        is_new = not existing.data
 
-        created_at = now_cet.isoformat() if is_new_event else existing.data[0]["created_at"]
+        if is_new:
+            created_at_cet = cet_now()
 
-        supabase.table("events").upsert({
-            "event_id": event["event_id"],
-            "sport_id": event["sport_id"],
-            "league_id": event["league_id"],
-            "league_name": event["league_name"],
-            "starts": event["starts"],
-            "home_team": event["home"],
-            "away_team": event["away"],
-            "created_at": created_at
-        }).execute()
+            # INSERT event (first time)
+            supabase.table("events").insert({
+                "event_id": event_id,
+                "sport_id": event["sport_id"],
+                "league_id": event["league_id"],
+                "league_name": event["league_name"],
+                "starts": event["starts"],
+                "home_team": event["home"],
+                "away_team": event["away"],
+                "created_at": created_at_cet.isoformat()
+            }).execute()
 
-        # Cache the event start time for freshness checks
-        event_created[event["event_id"]] = datetime.fromisoformat(event["starts"]).astimezone(ZoneInfo("Europe/Berlin"))
+            # Save in cache
+            event_created[event_id] = created_at_cet
 
-        if is_new_event:
-            msg = f":sparkles: New event added: *{event['home']}* vs *{event['away']}* in *{event['league_name']}* — starts {event['starts']}"
-            post_to_slack(msg)
+            # Slack notify
+            post_to_slack(
+                f":sparkles: New event added: *{event['home']}* vs *{event['away']}* in *{event['league_name']}* — starts {event['starts']}"
+            )
 
-# -----------------------------
+        else:
+            # Existing event → we must load cached created_at
+            created_at_str = existing.data[0]["created_at"]
+            event_created[event_id] = datetime.fromisoformat(created_at_str)
+
+            # UPDATE event fields except created_at
+            supabase.table("events").update({
+                "sport_id": event["sport_id"],
+                "league_id": event["league_id"],
+                "league_name": event["league_name"],
+                "starts": event["starts"],
+                "home_team": event["home"],
+                "away_team": event["away"],
+            }).eq("event_id", event_id).execute()
+
+
+# =============================================
 # Upsert market
-# -----------------------------
+# =============================================
 def upsert_market(event, period):
+
     event_id = event["event_id"]
 
-    # Skip markets for old events
-    if not is_event_fresh(event.get("starts")):
+    # missing cache means something is wrong
+    if event_id not in event_created:
+        return None
+
+    # apply the 3-hour rule
+    now_cet = cet_now()
+    if now_cet - event_created[event_id] > timedelta(hours=3):
         return None
 
     market_type = "money_line"
@@ -99,7 +118,7 @@ def upsert_market(event, period):
     line_id = period["line_id"]
     period_number = period["number"]
 
-    existing_market = (
+    existing = (
         supabase.table("markets")
         .select("market_id")
         .eq("event_id", event_id)
@@ -115,40 +134,39 @@ def upsert_market(event, period):
         "period_number": period_number,
         "market_type": market_type,
         "parameter": parameter,
-        "created_at": cet_now().isoformat()
+        "created_at": now_cet.isoformat()
     }
 
-    if existing_market.data:
-        market_id = existing_market.data[0]["market_id"]
+    if existing.data:
+        market_id = existing.data[0]["market_id"]
         supabase.table("markets").update(data).eq("market_id", market_id).execute()
     else:
         result = supabase.table("markets").insert(data).execute()
         market_id = result.data[0]["market_id"]
 
-    # Cache market -> event for odds
+    # Save mapping
     market_event[market_id] = event_id
+
     return market_id
 
-# -----------------------------
+
+# =============================================
 # Insert odds
-# -----------------------------
-def insert_odds(market_id, side, price, max_limit=None):
-    if market_id is None:
+# =============================================
+def insert_odds(market_id, side, price, max_limit):
+
+    if market_id not in market_event:
         return
 
-    event_id = market_event.get(market_id)
-    if not event_id:
+    event_id = market_event[market_id]
+
+    if event_id not in event_created:
         return
 
-    event_start = event_created.get(event_id)
-    if not event_start:
+    # 3-hour rule
+    if cet_now() - event_created[event_id] > timedelta(hours=3):
         return
 
-    now_cet = cet_now()
-    if now_cet - event_start > timedelta(hours=3):
-        return
-
-    # Check for existing identical odds
     existing = (
         supabase.table("odds_history")
         .select("*")
@@ -167,45 +185,41 @@ def insert_odds(market_id, side, price, max_limit=None):
             "side": side,
             "price": price,
             "max_limit": max_limit,
-            "pulled_at": now_cet.isoformat()
+            "pulled_at": cet_now().isoformat()
         }).execute()
 
-# -----------------------------
-# Process events from API
-# -----------------------------
+
+# =============================================
+# Process events
+# =============================================
 def process_event(events):
-    event_list = events.get('events', [])
-    if not event_list:
-        print("No events returned by API")
-        return
+    upsert_event(events)
 
-    upsert_event({"events": event_list})
+    for event in events["events"]:
+        for key, period in event.get("periods", {}).items():
 
-    for event in event_list:
-        for key, period in event.get('periods', {}).items():
             if period.get("money_line") and period.get("number") == 0:
+
                 market_id = upsert_market(event, period)
-                if market_id is None:
-                    continue
+
+                if not market_id:
+                    continue  # too old → skip
+
                 for side, line in period["money_line"].items():
                     insert_odds(market_id, side, line, 0)
 
-# -----------------------------
-# Fetch events from Pinnacle API
-# -----------------------------
-def fetch_event_list():
-    url = "https://pinnacle-odds.p.rapidapi.com/kit/v1/markets"
-    querystring = {"league_ids":"1835,1842,6417,2517","event_type":"prematch","sport_id":"1","is_have_odds":"true"}
-    headers = {
-        "x-rapidapi-key": os.getenv("PINNACLE_KEY"),
-        "x-rapidapi-host": "pinnacle-odds.p.rapidapi.com"
-    }
-    response = requests.get(url, headers=headers, params=querystring)
-    return response.json()
 
-# -----------------------------
-# Main
-# -----------------------------
-if __name__ == "__main__":
-    event_list = fetch_event_list()
-    process_event(event_list)
+# =============================================
+# RUN
+# =============================================
+url = "https://pinnacle-odds.p.rapidapi.com/kit/v1/markets"
+querystring = {"league_ids": "1835,1842", "event_type": "prematch", "sport_id": "1", "is_have_odds": "true"}
+headers = {
+    "x-rapidapi-key": "67356f377fmsh90217b51616e9d8p11c494jsnf87faa9470db",
+    "x-rapidapi-host": "pinnacle-odds.p.rapidapi.com"
+}
+
+response = requests.get(url, headers=headers, params=querystring)
+event_list = response.json()
+
+process_event(event_list)
