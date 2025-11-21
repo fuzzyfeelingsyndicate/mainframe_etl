@@ -40,6 +40,9 @@ def post_to_slack(data):
                 f"Away: {away_team}\n"
                 f"Home Move: {home_move:.2f}%\n"
                 f"Away Move: {away_move:.2f}%\n"
+                f"price home: {price_home:}\n"
+                f"price draw: {price_draw:}\n"
+                f"price away: {price_away:}\n"
                 "-----------------------------"
             )
             messages.append(msg)
