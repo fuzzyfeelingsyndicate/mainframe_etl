@@ -132,8 +132,8 @@ def check_odds(timedel=2):
 
     # Filter events with net movement > 2%
     man_ml = first_last[
-        (first_last['home_total_move'].abs() > 0) |
-        (first_last['away_total_move'].abs() > 0)
+        (first_last['home_total_move'].abs() > 6) |
+        (first_last['away_total_move'].abs() > 6)
     ].index
 
 
