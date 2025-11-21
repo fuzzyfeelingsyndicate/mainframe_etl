@@ -5,9 +5,7 @@ from supabase import create_client, client
 from datetime import datetime, timedelta
 from tabulate import tabulate
 
-# -----------------------------
-# SUPABASE & SLACK CONFIG
-# -----------------------------
+
 url = os.getenv("SUPABASE_URL")
 key = os.getenv("SUPABASE_KEY")
 supabase: client = create_client(url, key)
@@ -23,7 +21,6 @@ def post_to_slack(data):
         print("empty data")
         return
     
-    # If data is a DataFrame, format row by row
     if isinstance(data, pd.DataFrame):
         messages = []
         for i in range(len(data)):
@@ -33,7 +30,6 @@ def post_to_slack(data):
             home_team = row.get('home_team', '')
             away_team = row.get('away_team', '')
             
-            # Use home_total_move and away_total_move instead of no_vig_diff
             home_move = row.get('home_total_move', 0)
             away_move = row.get('away_total_move', 0)
 
@@ -58,9 +54,7 @@ def post_to_slack(data):
         print("Slack post failed:", resp.status_code, resp.text)
 
 
-# -----------------------------
-# VECTORIZED NO-VIG FUNCTION
-# -----------------------------
+
 def find_value_corrected_vectorized(df):
     ph = pd.to_numeric(df['price_home'], errors='coerce')
     pa = pd.to_numeric(df['price_away'], errors='coerce')
@@ -88,13 +82,9 @@ def find_value_corrected_vectorized(df):
 
     return res
 
-# -----------------------------
-# MAIN FUNCTION
-# -----------------------------
 def check_odds(timedel=2):
     cutoff_date = datetime.now() - timedelta(hours=timedel)
     
-    # Fetch data from Supabase
     events = pd.DataFrame(supabase.table('events').select('*').execute().data)
     markets = pd.DataFrame(supabase.table('markets').select('*').execute().data)
     odds_history = pd.DataFrame(
@@ -108,9 +98,6 @@ def check_odds(timedel=2):
         post_to_slack(odds_history)
         return
 
-    # -----------------------------
-    # BUILD MATCH WINNER DF
-    # -----------------------------
     home = odds_history[odds_history['side']=='home'][['market_id','price','max_limit','pulled_at']]
     away = odds_history[odds_history['side']=='away'][['market_id','price']].rename(columns={'price':'price_away'})
     draw = odds_history[odds_history['side']=='draw'][['market_id','price']].rename(columns={'price':'price_draw'})
@@ -126,9 +113,6 @@ def check_odds(timedel=2):
     match_winner[['overround','no_vig','home_no_vig','draw_no_vig','away_no_vig']] = \
         find_value_corrected_vectorized(match_winner)
 
-    # -----------------------------
-    # MERGE WITH EVENTS AND MARKETS
-    # -----------------------------
     Ix2 = (
         match_winner
         .merge(markets[['market_id','event_id']], on='market_id')
@@ -136,9 +120,6 @@ def check_odds(timedel=2):
         .sort_values(['event_id','pulled_at'])
     )
 
-    # -----------------------------
-    # NET MOVEMENT CALCULATION (FINAL - INITIAL)
-    # -----------------------------
     first_last = Ix2.groupby('event_id').agg(
         first_home=('home_no_vig','first'),
         last_home=('home_no_vig','last'),
@@ -155,9 +136,7 @@ def check_odds(timedel=2):
         (first_last['away_total_move'].abs() > 0)
     ].index
 
-    # -----------------------------
-    # SELECT FIRST + LAST ROWS PER EVENT
-    # -----------------------------
+
     subset = Ix2[Ix2['event_id'].isin(man_ml)]
     idx = subset.groupby('event_id')['pulled_at'].agg(['idxmin','idxmax'])
     first_last_rows = subset.loc[idx['idxmin'].tolist() + idx['idxmax'].tolist()]
@@ -170,9 +149,6 @@ def check_odds(timedel=2):
 
     result = result.sort_values(['event_id','pulled_at'])
 
-    # -----------------------------
-    # FINAL AGGREGATED OUTPUT
-    # -----------------------------
     final = (
         result.groupby('event_id')
         .agg({
@@ -196,7 +172,4 @@ def check_odds(timedel=2):
         post_to_slack(final)
         return
 
-# -----------------------------
-# RUN THE FUNCTION
-# -----------------------------
-check_odds(timedel=3)
+check_odds(timedel=12)
