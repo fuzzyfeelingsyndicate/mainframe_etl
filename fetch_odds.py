@@ -83,7 +83,7 @@ def upsert_market(event, period):
         return None
 
     now_cet = cet_now()
-    if now_cet - event_created[event_id] > timedelta(hours=3):
+    if now_cet - event_created[event_id] > timedelta(hours=24):
         return None
 
     market_type = "money_line"
@@ -132,7 +132,7 @@ def insert_odds(market_id, side, price, max_limit):
         return
 
     
-    if cet_now() - event_created[event_id] > timedelta(hours=12):
+    if cet_now() - event_created[event_id] > timedelta(hours=24):
         return
 
     existing = (
