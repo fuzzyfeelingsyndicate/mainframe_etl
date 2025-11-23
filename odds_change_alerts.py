@@ -135,8 +135,8 @@ def check_odds(timedel=2):
 
     # Filter events with net movement > 2%
     man_ml = first_last[
-        (first_last['home_total_move'].abs() > 6) |
-        (first_last['away_total_move'].abs() > 6)
+        (first_last['home_total_move'].abs() > 5) |
+        (first_last['away_total_move'].abs() > 5)
     ].index
 
 
@@ -175,4 +175,4 @@ def check_odds(timedel=2):
         post_to_slack(final)
         return
 
-check_odds(timedel=12)
+check_odds(timedel=24)
