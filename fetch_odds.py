@@ -175,7 +175,7 @@ def process_event(events):
 
 
 url = "https://pinnacle-odds.p.rapidapi.com/kit/v1/markets"
-querystring = {"league_ids": "1842,2438,199868,200813,1740", "event_type": "prematch", "sport_id": "1", "is_have_odds": "true"}
+querystring = {"league_ids": "1842,2438,199868,200813,1740,217401,217399,212572,212576", "event_type": "prematch", "sport_id": "1", "is_have_odds": "true"}
 headers = {
     "x-rapidapi-key": "67356f377fmsh90217b51616e9d8p11c494jsnf87faa9470db",
     "x-rapidapi-host": "pinnacle-odds.p.rapidapi.com"
