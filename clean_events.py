@@ -10,7 +10,7 @@ def clean_odds_history():
     """Delete odds_history records older than 6 hours"""
     try:
         # Calculate timestamp 6 hours ago
-        six_hours_ago = datetime.utcnow() - timedelta(hours=26)
+        six_hours_ago = datetime.utcnow() - timedelta(hours=50)
         
         # Delete records where pulled_at is older than 6 hours
         response = supabase.table("odds_history").delete().lt(
