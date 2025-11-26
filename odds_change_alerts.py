@@ -88,8 +88,8 @@ def find_value_corrected_vectorized(df):
 
     return res
 
-def check_odds(timedel=2):
-    cutoff_date = datetime.now() - timedelta(hours=timedel)
+def check_odds(timedel=60):
+    cutoff_date = datetime.now() - timedelta(minutes=timedel)
     
     events = pd.DataFrame(supabase.table('events').select('*').execute().data)
     markets = pd.DataFrame(supabase.table('markets').select('*').execute().data)
@@ -178,4 +178,4 @@ def check_odds(timedel=2):
         post_to_slack(final)
         return
 
-check_odds(timedel=1)
+check_odds(timedel=40)
