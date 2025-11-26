@@ -32,6 +32,9 @@ def post_to_slack(data):
             
             home_move = row.get('home_total_move', 0)
             away_move = row.get('away_total_move', 0)
+            price_home = row.get('price_home', '')
+            price_draw = row.get('price_draw', '')
+            price_away = row.get('price_away', '')
 
             msg = (
                 f"Event ID: {event_id}\n"
