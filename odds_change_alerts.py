@@ -178,4 +178,4 @@ def check_odds(timedel=60):
         post_to_slack(final)
         return
 
-check_odds(timedel=240)
+check_odds(timedel=900)
