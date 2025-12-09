@@ -32,4 +32,7 @@ jobs:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
 
           
-        run: python fetch_odds.py
+        run: |
+        python fetch_odds.py || echo "fetch_odds.py failed"
+        python odds_change_alerts.py
+        
