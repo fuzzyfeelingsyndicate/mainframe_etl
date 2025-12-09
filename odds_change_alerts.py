@@ -3,8 +3,6 @@ import pandas as pd
 import requests
 from supabase import create_client, client
 from datetime import datetime, timedelta
-from tabulate import tabulate
-
 
 url = os.getenv("SUPABASE_URL")
 key = os.getenv("SUPABASE_KEY")
