@@ -7,12 +7,9 @@ key = os.environ.get("SUPABASE_KEY")
 supabase: Client = create_client(url, key)
 
 def clean_odds_history():
-    """Delete odds_history records older than 6 hours"""
     try:
-        # Calculate timestamp 6 hours ago
         six_hours_ago = datetime.utcnow() - timedelta(hours=170)
         
-        # Delete records where pulled_at is older than 6 hours
         response = supabase.table("odds_history").delete().lt(
             "pulled_at", six_hours_ago.isoformat()
         ).execute()
@@ -24,11 +21,9 @@ def clean_odds_history():
         return False
 
 def clean_markets():
-    """Delete markets records with starts field older than current time"""
     try:
         current_time = datetime.utcnow().isoformat()
         
-        # Delete records where starts is in the past
         response = supabase.table("markets").delete().lt(
             "created_at", current_time
         ).execute()
@@ -40,11 +35,9 @@ def clean_markets():
         return False
 
 def clean_events():
-    """Delete events records with starts field older than current time"""
     try:
         current_time = datetime.utcnow().isoformat()
         
-        # Delete records where starts is in the past
         response = supabase.table("events").delete().lt(
             "created_at", current_time
         ).execute()
@@ -59,17 +52,16 @@ def main():
     """Execute cleaning in the correct order"""
     print("Starting database cleanup...\n")
     
-    # Clean in order of dependencies (reverse of constraint order)
-    if not clean_odds_history():
-        print("Stopping cleanup due to odds_history error")
-        return
-    
     if not clean_markets():
         print("Stopping cleanup due to markets error")
         return
     
     if not clean_events():
         print("Stopping cleanup due to events error")
+        return
+    
+    if not clean_odds_history():
+        print("Stopping cleanup due to odds_history error")
         return
     
     print("\n✓ Database cleanup completed successfully!")
