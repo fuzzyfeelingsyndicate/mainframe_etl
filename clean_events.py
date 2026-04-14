@@ -52,16 +52,16 @@ def main():
     """Execute cleaning in the correct order"""
     print("Starting database cleanup...\n")
     
+    if not clean_odds_history():
+        print("Stopping cleanup due to odds_history error")
+        return
+    
     if not clean_markets():
         print("Stopping cleanup due to markets error")
         return
     
     if not clean_events():
         print("Stopping cleanup due to events error")
-        return
-    
-    if not clean_odds_history():
-        print("Stopping cleanup due to odds_history error")
         return
     
     print("\n✓ Database cleanup completed successfully!")
