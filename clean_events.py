@@ -20,7 +20,7 @@ def clean_old_events():
         cutoff = datetime.utcnow() - timedelta(hours=6)
 
         response = supabase.table("events").delete().lt(
-            "start_time", cutoff.isoformat()
+            "starts", cutoff.isoformat()
         ).execute()
 
         print(f"✓ Deleted events: {len(response.data)}")
