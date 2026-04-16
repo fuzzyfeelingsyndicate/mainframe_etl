@@ -1,6 +1,6 @@
 import os
 import requests
-from supabase import create_client, client
+from supabase import create_client, Client
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -8,8 +8,9 @@ from zoneinfo import ZoneInfo
 def cet_now():
     return datetime.now(ZoneInfo("Europe/Berlin"))
 
-event_created = {}  
-market_event = {}  
+MAX_EVENT_AGE = timedelta(days=7)
+
+event_created = {}
 
 SLACK_WEBHOOK = os.getenv('SLACK_WEBHOOK')
 
@@ -17,13 +18,19 @@ def post_to_slack(message: str):
     if not SLACK_WEBHOOK:
         print("No Slack webhook defined")
         return
-    requests.post(SLACK_WEBHOOK, json={"text": message})
+    try:
+        requests.post(SLACK_WEBHOOK, json={"text": message}, timeout=10)
+    except requests.RequestException as e:
+        print(f"Slack notification failed: {e}")
 
 
 
-url = os.getenv("SUPABASE_URL")
-key = os.getenv("SUPABASE_KEY")
-supabase: client = create_client(url, key)
+supabase_url = os.getenv("SUPABASE_URL")
+supabase_key = os.getenv("SUPABASE_KEY")
+supabase: Client = create_client(supabase_url, supabase_key)
+rapid_url = os.getenv("RAPID_URL")
+rapid_api_key = os.getenv("RAPID_API_KEY")
+rapid_api_host = os.getenv("RAPID_API_HOST")
 
 
 def upsert_event(events):
@@ -83,7 +90,8 @@ def upsert_market(event, period):
         return None
 
     now_cet = cet_now()
-    if now_cet - event_created[event_id] > timedelta(hours=168):
+
+    if now_cet - event_created[event_id] > MAX_EVENT_AGE:
         return None
 
     market_type = "money_line"
@@ -117,50 +125,49 @@ def upsert_market(event, period):
         result = supabase.table("markets").insert(data).execute()
         market_id = result.data[0]["market_id"]
 
-    market_event[market_id] = event_id
-
     return market_id
 
-def insert_odds(market_id, side, price, max_limit):
-
-    if market_id not in market_event:
-        return
-
-    event_id = market_event[market_id]
+def insert_odds(event_id, market_id, side, price, max_limit):
 
     if event_id not in event_created:
         return
 
-    
-    if cet_now() - event_created[event_id] > timedelta(hours=168):
+    if cet_now() - event_created[event_id] > MAX_EVENT_AGE:
         return
 
     existing = (
         supabase.table("odds_history")
-        .select("*")
+        .select("price", "pulled_at")
         .eq("market_id", market_id)
         .eq("side", side)
-        .eq("price", price)
-        .eq("max_limit", max_limit)
         .order("pulled_at", desc=True)
         .limit(1)
         .execute()
     )
 
-    if not existing.data:
-        supabase.table("odds_history").insert({
-            "market_id": market_id,
-            "side": side,
-            "price": price,
-            "max_limit": max_limit,
-            "pulled_at": cet_now().isoformat()
-        }).execute()
+    if existing.data:
+        last_price = existing.data[0]["price"]
+        if last_price == price:
+            return
+
+    supabase.table("odds_history").insert({
+        "event_id": event_id,  
+        "market_id": market_id,
+        "side": side,
+        "price": price,
+        "max_limit": max_limit,
+        "pulled_at": cet_now().isoformat()
+    }).execute()
 
 
 def process_event(events):
+
     upsert_event(events)
 
     for event in events["events"]:
+
+        event_id = event["event_id"] 
+
         for key, period in event.get("periods", {}).items():
 
             if period.get("money_line") and period.get("number") == 0:
@@ -171,17 +178,23 @@ def process_event(events):
                     continue  
 
                 for side, line in period["money_line"].items():
-                    insert_odds(market_id, side, line, 0)
+                    insert_odds(event_id, market_id, side, line, period.get("max_limit", 0))
 
 
-url = "https://pinnacle-odds.p.rapidapi.com/kit/v1/markets"
-querystring = {"league_ids": "2438,199868,200813,1740,217401,217399,212572,212576,217400,217562,199211,200201,1978,1952,1951", "event_type": "prematch", "sport_id": "1", "is_have_odds": "true"}
-headers = {
-    "x-rapidapi-key": "67356f377fmsh90217b51616e9d8p11c494jsnf87faa9470db",
-    "x-rapidapi-host": "pinnacle-odds.p.rapidapi.com"
-}
+if __name__ == "__main__":
+    api_url = rapid_url
+    querystring = {"league_ids": "2438,199868,200813,1740,217401,217399,212572,212576,217400,217562,199211,200201,1978,1952,1951", "event_type": "prematch", "sport_id": "1", "is_have_odds": "true"}
+    headers = {
+        "x-rapidapi-key": rapid_api_key,
+        "x-rapidapi-host": rapid_api_host
+    }
 
-response = requests.get(url, headers=headers, params=querystring)
-event_list = response.json()
+    try:
+        response = requests.get(api_url, headers=headers, params=querystring, timeout=30)
+        response.raise_for_status()
+        event_list = response.json()
+    except requests.RequestException as e:
+        print(f"API request failed: {e}")
+        raise SystemExit(1)
 
-process_event(event_list)
+    process_event(event_list)
