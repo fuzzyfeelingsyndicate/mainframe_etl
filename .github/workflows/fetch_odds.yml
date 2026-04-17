@@ -22,8 +22,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Write Google dependencies
-        run: echo `${{ secrets.GOOGLE_SA_KEY }}` > credentials.json
+      - name: Write Google credentials
+        run: echo '${{ secrets.GOOGLE_SA_KEY }}' > credentials.json
 
       - name: Run script
         env:
