@@ -94,7 +94,6 @@ def load_markets(event_ids):
         market_cache[(r["event_id"], r["line_id"])] = r["market_id"]
 
 def load_latest_odds(market_ids):
-    """Returns dict of (market_id, side) -> last price"""
     if not market_ids:
         return {}
     cutoff = (cet_now() - timedelta(hours=24)).isoformat()
