@@ -7,7 +7,7 @@ from googleapiclient.http import MediaFileUpload
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 
 def get_drive_service():
-    creds_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_KEY")
+    creds_json = os.getenv("GOOGLE_SA_KEY")
     creds_info = json.loads(creds_json)
     creds = service_account.Credentials.from_service_account_info(
         creds_info, scopes=SCOPES
