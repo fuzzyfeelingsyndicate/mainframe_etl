@@ -34,24 +34,23 @@ rapid_api_host = os.getenv("RAPID_API_HOST")
 
 
 def upsert_event(events):
+    all_ids = [e["event_id"] for e in events["events"]]
 
-    for event in events['events']:
+    existing_rows = (
+        supabase.table("events")
+        .select("event_id", "created_at")
+        .in_("event_id", all_ids)
+        .execute()
+    ).data
+    existing_map = {r["event_id"]: r["created_at"] for r in existing_rows}
 
+    now_cet = cet_now()
+    new_events = []
+
+    for event in events["events"]:
         event_id = event["event_id"]
-
-        existing = (
-            supabase.table("events")
-            .select("event_id", "created_at")
-            .eq("event_id", event_id)
-            .execute()
-        )
-
-        is_new = not existing.data
-
-        if is_new:
-            created_at_cet = cet_now()
-
-            supabase.table("events").insert({
+        if event_id not in existing_map:
+            new_events.append({
                 "event_id": event_id,
                 "sport_id": event["sport_id"],
                 "league_id": event["league_id"],
@@ -59,19 +58,14 @@ def upsert_event(events):
                 "starts": event["starts"],
                 "home_team": event["home"],
                 "away_team": event["away"],
-                "created_at": created_at_cet.isoformat()
-            }).execute()
-
-            event_created[event_id] = created_at_cet
-
+                "created_at": now_cet.isoformat()
+            })
+            event_created[event_id] = now_cet
             post_to_slack(
                 f":sparkles: New event added: *{event['home']}* vs *{event['away']}* in *{event['league_name']}* — starts {event['starts']}"
             )
-
         else:
-            created_at_str = existing.data[0]["created_at"]
-            event_created[event_id] = datetime.fromisoformat(created_at_str)
-
+            event_created[event_id] = datetime.fromisoformat(existing_map[event_id])
             supabase.table("events").update({
                 "sport_id": event["sport_id"],
                 "league_id": event["league_id"],
@@ -81,77 +75,82 @@ def upsert_event(events):
                 "away_team": event["away"],
             }).eq("event_id", event_id).execute()
 
+    if new_events:
+        supabase.table("events").insert(new_events).execute()
+
+
+market_cache = {}
+
+def load_markets(event_ids):
+    rows = (
+        supabase.table("markets")
+        .select("market_id", "event_id", "line_id")
+        .in_("event_id", event_ids)
+        .eq("market_type", "money_line")
+        .eq("parameter", 0)
+        .execute()
+    ).data
+    for r in rows:
+        market_cache[(r["event_id"], r["line_id"])] = r["market_id"]
+
+def load_latest_odds(market_ids):
+    """Returns dict of (market_id, side) -> last price"""
+    if not market_ids:
+        return {}
+    rows = (
+        supabase.table("odds_history")
+        .select("market_id", "side", "price", "pulled_at")
+        .in_("market_id", market_ids)
+        .order("pulled_at", desc=True)
+        .execute()
+    ).data
+    seen = {}
+    for r in rows:
+        key = (r["market_id"], r["side"])
+        if key not in seen:
+            seen[key] = r["price"]
+    return seen
 
 def upsert_market(event, period):
-
     event_id = event["event_id"]
-
     if event_id not in event_created:
         return None
-
-    now_cet = cet_now()
-
-    if now_cet - event_created[event_id] > MAX_EVENT_AGE:
+    if cet_now() - event_created[event_id] > MAX_EVENT_AGE:
         return None
 
-    market_type = "money_line"
-    parameter = 0
     line_id = period["line_id"]
-    period_number = period["number"]
-
-    existing = (
-        supabase.table("markets")
-        .select("market_id")
-        .eq("event_id", event_id)
-        .eq("line_id", line_id)
-        .eq("market_type", market_type)
-        .eq("parameter", parameter)
-        .execute()
-    )
+    cache_key = (event_id, line_id)
+    now_cet = cet_now()
 
     data = {
         "event_id": event_id,
         "line_id": line_id,
-        "period_number": period_number,
-        "market_type": market_type,
-        "parameter": parameter,
+        "period_number": period["number"],
+        "market_type": "money_line",
+        "parameter": 0,
         "created_at": now_cet.isoformat()
     }
 
-    if existing.data:
-        market_id = existing.data[0]["market_id"]
+    if cache_key in market_cache:
+        market_id = market_cache[cache_key]
         supabase.table("markets").update(data).eq("market_id", market_id).execute()
     else:
         result = supabase.table("markets").insert(data).execute()
         market_id = result.data[0]["market_id"]
+        market_cache[cache_key] = market_id
 
     return market_id
 
-def insert_odds(event_id, market_id, side, price, max_limit):
-
+def insert_odds(event_id, market_id, side, price, max_limit, latest_odds):
     if event_id not in event_created:
         return
-
     if cet_now() - event_created[event_id] > MAX_EVENT_AGE:
         return
-
-    existing = (
-        supabase.table("odds_history")
-        .select("price", "pulled_at")
-        .eq("market_id", market_id)
-        .eq("side", side)
-        .order("pulled_at", desc=True)
-        .limit(1)
-        .execute()
-    )
-
-    if existing.data:
-        last_price = existing.data[0]["price"]
-        if last_price == price:
-            return
+    if latest_odds.get((market_id, side)) == price:
+        return
 
     supabase.table("odds_history").insert({
-        "event_id": event_id,  
+        "event_id": event_id,
         "market_id": market_id,
         "side": side,
         "price": price,
@@ -161,24 +160,23 @@ def insert_odds(event_id, market_id, side, price, max_limit):
 
 
 def process_event(events):
-
     upsert_event(events)
 
+    valid_ids = [e["event_id"] for e in events["events"] if e["event_id"] in event_created]
+    load_markets(valid_ids)
+
+    market_ids = list(market_cache.values())
+    latest_odds = load_latest_odds(market_ids)
+
     for event in events["events"]:
-
-        event_id = event["event_id"] 
-
+        event_id = event["event_id"]
         for key, period in event.get("periods", {}).items():
-
             if period.get("money_line") and period.get("number") == 0:
-
                 market_id = upsert_market(event, period)
-
                 if not market_id:
-                    continue  
-
+                    continue
                 for side, line in period["money_line"].items():
-                    insert_odds(event_id, market_id, side, line, period.get("max_limit", 0))
+                    insert_odds(event_id, market_id, side, line, period.get("max_limit", 0), latest_odds)
 
 
 if __name__ == "__main__":
