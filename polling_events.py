@@ -22,7 +22,7 @@ drive = build("drive", "v3", credentials=creds)
 filename = "sample.parquet"
 df.to_parquet(filename)
 
-file_metadata = {"name": filename}
+file_metadata = {"name": filename, "parents": ["1zCu1_bKCq8rxxyuiIa3A4gfG7PbsKeqO"]}
 media = MediaFileUpload(filename, mimetype="application/octet-stream")
 drive.files().create(body=file_metadata, media_body=media).execute()
 
