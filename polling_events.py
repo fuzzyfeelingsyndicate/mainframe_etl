@@ -2,7 +2,7 @@ import os
 import pandas as pd
 from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive
-from oauth2client.service_account import ServiceAccountCredentials
+from google.oauth2.service_account import Credentials
 
 df = pd.DataFrame(
     {
@@ -17,7 +17,7 @@ scope = ["https://www.googleapis.com/auth/drive"]
 creds_path = os.getenv("GOOGLE_CREDENTIALS_PATH", "credentials.json")
 
 gauth = GoogleAuth()
-gauth.credentials = ServiceAccountCredentials.from_json_keyfile_name(creds_path, scope)
+gauth.credentials = Credentials.from_service_account_file(creds_path, scopes=scope)
 
 drive = GoogleDrive(gauth)
 filename = "sample.parquet"
