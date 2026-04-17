@@ -1,5 +1,5 @@
 pandas==2.3.2
-pydrive2==1.21.1
+google-api-python-client==2.131.0
 google-auth==2.29.0
 google-auth-httplib2==0.2.0
 pyarrow==17.0.0
