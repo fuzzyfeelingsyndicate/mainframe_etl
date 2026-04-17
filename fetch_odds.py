@@ -97,10 +97,12 @@ def load_latest_odds(market_ids):
     """Returns dict of (market_id, side) -> last price"""
     if not market_ids:
         return {}
+    cutoff = (cet_now() - timedelta(hours=24)).isoformat()
     rows = (
         supabase.table("odds_history")
         .select("market_id", "side", "price", "pulled_at")
         .in_("market_id", market_ids)
+        .gt("pulled_at", cutoff)
         .order("pulled_at", desc=True)
         .execute()
     ).data
@@ -120,26 +122,21 @@ def upsert_market(event, period):
 
     line_id = period["line_id"]
     cache_key = (event_id, line_id)
-    now_cet = cet_now()
 
-    data = {
-        "event_id": event_id,
-        "line_id": line_id,
-        "period_number": period["number"],
-        "market_type": "money_line",
-        "parameter": 0,
-        "created_at": now_cet.isoformat()
-    }
-
-    if cache_key in market_cache:
-        market_id = market_cache[cache_key]
-        supabase.table("markets").update(data).eq("market_id", market_id).execute()
-    else:
+    if cache_key not in market_cache:
+        data = {
+            "event_id": event_id,
+            "line_id": line_id,
+            "period_number": period["number"],
+            "market_type": "money_line",
+            "parameter": 0,
+            "created_at": cet_now().isoformat()
+        }
         result = supabase.table("markets").insert(data).execute()
         market_id = result.data[0]["market_id"]
         market_cache[cache_key] = market_id
 
-    return market_id
+    return market_cache[cache_key]
 
 def insert_odds(event_id, market_id, side, price, max_limit, latest_odds):
     if event_id not in event_created:
