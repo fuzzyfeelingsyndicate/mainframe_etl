@@ -3,6 +3,7 @@ import json
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
+import pandas as pd
 
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 
@@ -14,12 +15,14 @@ def get_drive_service():
     )
     return build("drive", "v3", credentials=creds)
 
-def upload_parquet(df, file_name, folder_id):
+def upload_df_to_drive(df, file_name, folder_id):
     service = get_drive_service()
     buffer = io.BytesIO()
-    file_name = os.path.basename(file_path)
+    df.to_parquet(buffer, index=False)
+    buffer.seek(0)
+
     metadata = {"name": file_name, "parents": [folder_id]}
-    media = MediaFileUpload(file_path, mimetype="application/octet-stream")
+    media = MediaIoBaseUpload(buffer, mimetype="application/octet-stream")
     uploaded = service.files().create(
         body=metadata, media_body=media, fields="id"
     ).execute()
@@ -32,4 +35,4 @@ data = {
 
 df = pd.dataframe(data)
 
-upload_parquet( , '1keVxmV4jfm0esecJA0LCYmbQohNWBf0F')
+upload_df_to_drive(df, "events.parquet", "1keVxmV4jfm0esecJA0LCYmbQohNWBf0F")
