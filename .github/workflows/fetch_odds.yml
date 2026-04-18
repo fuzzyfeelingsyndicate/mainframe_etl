@@ -44,4 +44,3 @@ jobs:
 
         run: |
           python fetch_odds.py
-          python polling_events.py
