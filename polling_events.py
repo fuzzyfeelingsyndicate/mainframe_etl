@@ -1,8 +1,9 @@
 import os
+import io
 import json
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
+from googleapiclient.http import MediaIoBaseUpload
 import pandas as pd
 
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]
@@ -34,5 +35,4 @@ data = {
 }
 
 df = pd.dataframe(data)
-
 upload_df_to_drive(df, "events.parquet", "1keVxmV4jfm0esecJA0LCYmbQohNWBf0F")
