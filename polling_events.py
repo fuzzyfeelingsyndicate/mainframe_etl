@@ -34,5 +34,5 @@ data = {
     "home_tema" : ['arsenal', 'chelsea']
 }
 
-df = pd.dataframe(data)
+df = pd.DataFrame(data)
 upload_df_to_drive(df, "events.parquet", "1keVxmV4jfm0esecJA0LCYmbQohNWBf0F")
