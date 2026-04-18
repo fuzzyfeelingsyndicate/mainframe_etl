@@ -38,7 +38,6 @@ def upload_df_to_drive(df, file_name, folder_id):
 
 
 if __name__ == "__main__":
-    # Example: replace this with your actual DataFrame
     data = {
         "event_id": [101, 102],
         "home_team": ["Arsenal", "Chelsea"],

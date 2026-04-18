@@ -16,5 +16,12 @@ flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
 creds = flow.run_local_server(port=0)
 
 print("\n=== Copy everything below this line into GOOGLE_OAUTH_TOKEN secret ===\n")
-print(creds.to_json())
 print("\n=== Copy everything above this line ===")
+
+token_json = creds.to_json()
+
+print(token_json)
+
+with open("token_json", 'w') as f:
+  f.write(token_json)
+  
