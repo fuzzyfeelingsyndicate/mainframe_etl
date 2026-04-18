@@ -9,8 +9,8 @@ import pandas as pd
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 
 def get_drive_service():
-    creds_json = os.getenv("GOOGLE_SA_KEY")
-    creds_info = json.loads(creds_json)
+    with open("credentials.json") as f:
+        creds_info = json.load(f)
     creds = service_account.Credentials.from_service_account_info(
         creds_info, scopes=SCOPES
     )
