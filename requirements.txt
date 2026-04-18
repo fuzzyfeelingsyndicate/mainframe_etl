@@ -2,6 +2,7 @@ pandas==2.3.2
 google-api-python-client==2.131.0
 google-auth==2.29.0
 google-auth-httplib2==0.2.0
+google-auth-oauthlib
 pyarrow==17.0.0
 requests==2.32.3
 supabase==2.23.0
