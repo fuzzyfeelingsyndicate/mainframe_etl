@@ -14,8 +14,9 @@ def get_drive_service():
     )
     return build("drive", "v3", credentials=creds)
 
-def upload_parquet(file_path, folder_id):
+def upload_parquet(df, file_name, folder_id):
     service = get_drive_service()
+    buffer = io.BytesIO()
     file_name = os.path.basename(file_path)
     metadata = {"name": file_name, "parents": [folder_id]}
     media = MediaFileUpload(file_path, mimetype="application/octet-stream")
@@ -24,3 +25,11 @@ def upload_parquet(file_path, folder_id):
     ).execute()
     print(f"Uploaded {file_name} with ID: {uploaded.get('id')}")
 
+data = {
+    "eevent id " : [101,102],
+    "home_tema" : ['arsenal', 'chelsea']
+}
+
+df = pd.dataframe(data)
+
+upload_parquet( , '1keVxmV4jfm0esecJA0LCYmbQohNWBf0F')
