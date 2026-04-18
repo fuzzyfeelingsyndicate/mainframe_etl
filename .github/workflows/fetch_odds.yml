@@ -40,4 +40,5 @@ jobs:
           RAPID_API_KEY: ${{ secrets.RAPID_API_KEY }}
           RAPID_API_HOST: ${{ secrets.RAPID_API_HOST }}
         run: |
-          python fetch_odds.py        
+          python fetch_odds.py
+          python polling_events.py
