@@ -7,14 +7,14 @@ import json
 import pandas as pd
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
-# from googleapiclient.discovery import build
-# from googleapiclient.http import MediaIoBaseUpload
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
 from supabase import create_client, Client
 import requests
 import store_details_lines
 
-# SCOPES = ["https://www.googleapis.com/auth/drive.file"]
-# FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
+SCOPES = ["https://www.googleapis.com/auth/drive.file"]
+FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
 
 supabase_url = os.getenv("SUPABASE_URL")
 supabase_key = os.getenv("SUPABASE_KEY")
