@@ -49,7 +49,7 @@ def upload_df_to_drive(df, file_name, folder_id):
 
 def get_event_details(event_id):
     url = os.getenv("RAPID_URL")
-    querystring = {"event_id":event_id}
+    querystring = {"event_id": str(event_id)}
     headers = {
         "x-rapidapi-key": os.getenv("RAPID_API_KEY"),
         "x-rapidapi-host": os.getenv("RAPID_API_HOST"),
@@ -71,7 +71,7 @@ def get_data():
         if starts.tzinfo is None:
             starts = starts.replace(tzinfo=timezone.utc)
         timedif = starts - timenow
-        if timedelta(0) <= timedif <= timedelta(hours=48):
+        if timedelta(0) <= timedif <= timedelta(hours=25):
             events.append(event['event_id'])
     if not FOLDER_ID:
         raise RuntimeError("GOOGLE_DRIVE_FOLDER_ID env var is not set")
