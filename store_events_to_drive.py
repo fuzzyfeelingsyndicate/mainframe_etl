@@ -71,13 +71,17 @@ def get_data():
         if starts.tzinfo is None:
             starts = starts.replace(tzinfo=timezone.utc)
         timedif = starts - timenow
-        if timedelta(0) <= timedif <= timedelta(hours=25):
+        if timedelta(0) <= timedif <= timedelta(hours=8):
             events.append(event['event_id'])
+    if not FOLDER_ID:
+        raise RuntimeError("GOOGLE_DRIVE_FOLDER_ID env var is not set")
     for event_id in events:
-        df = get_event_details(event_id)
-        filename = f'{event_id}{pulled_at}.parquet'        
-        if not FOLDER_ID:
-            raise RuntimeError("GOOGLE_DRIVE_FOLDER_ID env var is not set")
+        try:
+            df = get_event_details(event_id)
+        except requests.exceptions.HTTPError as e:
+            print(f"Skipping event {event_id}: {e}")
+            continue
+        filename = f'{event_id}{pulled_at}.parquet'
         upload_df_to_drive(df, filename, FOLDER_ID)
 
 
