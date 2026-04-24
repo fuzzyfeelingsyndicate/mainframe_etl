@@ -7,14 +7,14 @@ import json
 import pandas as pd
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload
+# from googleapiclient.discovery import build
+# from googleapiclient.http import MediaIoBaseUpload
 from supabase import create_client, Client
 import requests
 import store_details_lines
 
-SCOPES = ["https://www.googleapis.com/auth/drive.file"]
-FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
+# SCOPES = ["https://www.googleapis.com/auth/drive.file"]
+# FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
 
 supabase_url = os.getenv("SUPABASE_URL")
 supabase_key = os.getenv("SUPABASE_KEY")
@@ -49,7 +49,7 @@ def upload_df_to_drive(df, file_name, folder_id):
 
 def get_event_details(event_id):
     url = os.getenv("RAPID_URL")
-    querystring = {"event_id": str(event_id)}
+    querystring = {"event_id": event_id}
     headers = {
         "x-rapidapi-key": os.getenv("RAPID_API_KEY"),
         "x-rapidapi-host": os.getenv("RAPID_API_HOST"),
@@ -71,7 +71,7 @@ def get_data():
         if starts.tzinfo is None:
             starts = starts.replace(tzinfo=timezone.utc)
         timedif = starts - timenow
-        if timedelta(0) <= timedif <= timedelta(hours=25):
+        if timedelta(0) <= timedif <= timedelta(hours=10):
             events.append(event['event_id'])
     if not FOLDER_ID:
         raise RuntimeError("GOOGLE_DRIVE_FOLDER_ID env var is not set")
@@ -79,10 +79,13 @@ def get_data():
         try:
             df = get_event_details(event_id)
         except requests.exceptions.HTTPError as e:
-            print(f"Skipping event {event_id}: {e}")
+            print(f"Skipping event {event_id} (API error): {e}")
             continue
-        filename = f'{event_id}{pulled_at}.parquet'
-        upload_df_to_drive(df, filename, FOLDER_ID)
+        try:
+            filename = f'{event_id}{pulled_at}.parquet'
+            upload_df_to_drive(df, filename, FOLDER_ID)
+        except Exception as e:
+            print(f"Failed to upload event {event_id} to Drive: {e}")
 
 
 if __name__ == "__main__":
