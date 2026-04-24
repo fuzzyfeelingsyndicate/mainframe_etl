@@ -148,26 +148,3 @@ def save_to_parquet(df: pd.DataFrame, path: str) -> None:
         index=False,
         use_dictionary=["league_name", "home_team", "away_team", "market_type", "side"],
     )
-
-
-if __name__ == "__main__":
-    import json
-
-    sample_path = r"C:\Users\hadyaleelanandam\Downloads\js"
-    with open(sample_path, "r") as f:
-        data = json.load(f)
-
-    df = extract_period0_history(data)
-
-    print(f"Total rows: {len(df)}")
-    print(f"Memory usage: {df.memory_usage(deep=True).sum() / 1024:.1f} KB")
-    print(f"\nRows by market_type:")
-    print(df["market_type"].value_counts().to_string())
-    print(f"\nSample:\n{df.head()}")
-
-    out_path = r"C:\Users\hadyaleelanandam\Downloads\sample_output.parquet"
-    save_to_parquet(df, out_path)
-    print(f"\nParquet saved to: {out_path}")
-
-    import os
-    print(f"Parquet file size: {os.path.getsize(out_path) / 1024:.1f} KB")
