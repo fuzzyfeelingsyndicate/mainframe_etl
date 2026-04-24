@@ -36,7 +36,7 @@ def upload_df_to_drive(df, file_name, folder_id):
     """Upload a DataFrame as a parquet file directly to Google Drive."""
     service = get_drive_service()
     buffer = io.BytesIO()
-    df.to_parquet(buffer, index=False)
+    df.to_parquet(buffer, index=False, compression="zstd")
     buffer.seek(0)
 
     metadata = {"name": file_name, "parents": [folder_id]}
@@ -73,7 +73,7 @@ def get_data():
         if starts.tzinfo is None:
             starts = starts.replace(tzinfo=timezone.utc)
         timedif = starts - timenow
-        if timedelta(0) <= timedif <= timedelta(hours=10):
+        if timedelta(0) <= timedif <= timedelta(minutes=20):
             events.append({'event_id': event['event_id'], 'sport_id': event.get('sport_id', 1)})
     if not FOLDER_ID:
         raise RuntimeError("GOOGLE_DRIVE_FOLDER_ID env var is not set")
