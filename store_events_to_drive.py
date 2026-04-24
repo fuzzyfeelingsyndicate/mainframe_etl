@@ -47,9 +47,9 @@ def upload_df_to_drive(df, file_name, folder_id):
     print(f"Uploaded {file_name} with ID: {uploaded.get('id')}")
 
 
-def get_event_details(event_id):
+def get_event_details(event_id, sport_id):
     url = os.getenv("RAPID_URL")
-    querystring = {"event_id": event_id}
+    querystring = {"event_id": event_id, "sport_id": sport_id}
     headers = {
         "x-rapidapi-key": os.getenv("RAPID_API_KEY"),
         "x-rapidapi-host": os.getenv("RAPID_API_HOST"),
@@ -57,13 +57,13 @@ def get_event_details(event_id):
     }
     response = requests.get(url, headers=headers, params=querystring)
     if not response.ok:
-        print(f"[DEBUG] event_id={event_id} type={type(event_id)} status={response.status_code} body={response.text[:300]}")
+        print(f"[DEBUG] event_id={event_id} sport_id={sport_id} status={response.status_code} body={response.text[:300]}")
     response.raise_for_status()
     return store_details_lines.extract_period0_history(response.json())
 
 
 def get_data():
-    response = supabase.table('events').select('event_id', 'starts').execute().data 
+    response = supabase.table('events').select('event_id', 'starts', 'sport_id').execute().data 
     events = []
     pulled_at = datetime.now(timezone.utc).date()
 
@@ -74,12 +74,14 @@ def get_data():
             starts = starts.replace(tzinfo=timezone.utc)
         timedif = starts - timenow
         if timedelta(0) <= timedif <= timedelta(hours=10):
-            events.append(event['event_id'])
+            events.append({'event_id': event['event_id'], 'sport_id': event.get('sport_id', 1)})
     if not FOLDER_ID:
         raise RuntimeError("GOOGLE_DRIVE_FOLDER_ID env var is not set")
-    for event_id in events:
+    for ev in events:
+        event_id = ev['event_id']
+        sport_id = ev['sport_id']
         try:
-            df = get_event_details(event_id)
+            df = get_event_details(event_id, sport_id)
         except requests.exceptions.HTTPError as e:
             print(f"Skipping event {event_id} (API error): {e}")
             continue
