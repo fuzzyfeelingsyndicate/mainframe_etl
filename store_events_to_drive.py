@@ -71,7 +71,7 @@ def get_data():
         if starts.tzinfo is None:
             starts = starts.replace(tzinfo=timezone.utc)
         timedif = starts - timenow
-        if timedelta(0) <= timedif <= timedelta(hours=8):
+        if timedelta(0) <= timedif <= timedelta(hours=10):
             events.append(event['event_id'])
     if not FOLDER_ID:
         raise RuntimeError("GOOGLE_DRIVE_FOLDER_ID env var is not set")
