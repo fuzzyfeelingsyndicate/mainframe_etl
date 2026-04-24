@@ -7,14 +7,14 @@ import json
 import pandas as pd
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload
+# from googleapiclient.discovery import build
+# from googleapiclient.http import MediaIoBaseUpload
 from supabase import create_client, Client
 import requests
 import store_details_lines
 
-SCOPES = ["https://www.googleapis.com/auth/drive.file"]
-FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
+# SCOPES = ["https://www.googleapis.com/auth/drive.file"]
+# FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
 
 supabase_url = os.getenv("SUPABASE_URL")
 supabase_key = os.getenv("SUPABASE_KEY")
@@ -56,6 +56,8 @@ def get_event_details(event_id):
         "Content-Type": "application/json"
     }
     response = requests.get(url, headers=headers, params=querystring)
+    if not response.ok:
+        print(f"[DEBUG] event_id={event_id} type={type(event_id)} status={response.status_code} body={response.text[:300]}")
     response.raise_for_status()
     return store_details_lines.extract_period0_history(response.json())
 
