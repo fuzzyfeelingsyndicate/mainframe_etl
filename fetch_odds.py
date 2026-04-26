@@ -131,7 +131,11 @@ def upsert_market(event, period):
             "parameter": 0,
             "created_at": cet_now().isoformat()
         }
-        result = supabase.table("markets").insert(data).execute()
+        result = (
+            supabase.table("markets")
+            .upsert(data, on_conflict="event_id,line_id,market_type,parameter")
+            .execute()
+        )
         market_id = result.data[0]["market_id"]
         market_cache[cache_key] = market_id
 
