@@ -181,7 +181,7 @@ def process_event(events):
 
 if __name__ == "__main__":
     api_url = rapid_url
-    querystring = {"league_ids": "2438,199868,200813,1740,217401,217399,212572,212576,217400,217562,199211,200201,1978,1952,1951", "event_type": "prematch", "sport_id": "1", "is_have_odds": "true"}
+    querystring = {"league_ids": "2438,199868,200813,1740,217401,217399,212572,212576,217400,217562,199211,200201,1978,1952,1951,2037", "event_type": "prematch", "sport_id": "1", "is_have_odds": "true"}
     headers = {
         "x-rapidapi-key": rapid_api_key,
         "x-rapidapi-host": rapid_api_host
