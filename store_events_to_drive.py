@@ -37,10 +37,12 @@ def upload_df_to_drive(df, file_name, folder_id):
     service = get_drive_service()
     buffer = io.BytesIO()
     df.to_parquet(buffer, index=False, compression="zstd")
+    buffer_size = buffer.tell()
     buffer.seek(0)
+    print(f"[DEBUG] Buffer size for {file_name}: {buffer_size} bytes, df rows: {len(df)}")
 
     metadata = {"name": file_name, "parents": [folder_id]}
-    media = MediaIoBaseUpload(buffer, mimetype="application/octet-stream")
+    media = MediaIoBaseUpload(buffer, mimetype="application/octet-stream", resumable=True)
     uploaded = service.files().create(
         body=metadata, media_body=media, fields="id"
     ).execute()
@@ -89,8 +91,12 @@ def get_data():
         except requests.exceptions.HTTPError as e:
             print(f"Skipping event {event_id} (API error): {e}")
             continue
+        if df.empty:
+            print(f"[WARN] Event {event_id}: API returned data but DataFrame is empty (no period/history match)")
+            continue
         try:
             filename = f'{event_id}{pulled_at}.parquet'
+            print(f"[INFO] Uploading event {event_id}: {len(df)} rows, columns: {list(df.columns)}")
             upload_df_to_drive(df, filename, FOLDER_ID)
         except Exception as e:
             print(f"Failed to upload event {event_id} to Drive: {e}")
