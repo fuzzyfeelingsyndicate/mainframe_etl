@@ -139,6 +139,90 @@ def extract_period0_history(api_response: dict) -> pd.DataFrame:
     return df[col_order]
 
 
+DTYPES_CURRENT = {
+    "event_id": "int64",
+    "sport_id": "int16",
+    "league_id": "int32",
+    "league_name": "category",
+    "home_team": "category",
+    "away_team": "category",
+    "starts": "str",
+    "period": "int8",
+    "market_type": "category",
+    "line": "float32",
+    "side": "category",
+    "odds": "float64",
+    "max_limit": "int32",
+}
+
+
+def extract_period0_current(api_response: dict) -> pd.DataFrame:
+    """
+    Extract current moneyline, spread, and total odds from period num_0.
+    Works with the event details endpoint that returns current lines
+    (not historical line movement).
+    """
+    all_rows = []
+
+    for event in api_response.get("events", []):
+        event_id = event["event_id"]
+        period_data = event.get("periods", {}).get("num_0")
+        if not period_data:
+            continue
+
+        event_meta = {
+            "event_id": event_id,
+            "sport_id": event.get("sport_id"),
+            "league_id": event.get("league_id"),
+            "league_name": event.get("league_name"),
+            "home_team": event.get("home"),
+            "away_team": event.get("away"),
+            "starts": event.get("starts"),
+            "period": 0,
+        }
+
+        # Moneyline: {"home": 3, "draw": 3.15, "away": 2.58}
+        ml = period_data.get("money_line", {})
+        for side, odds in ml.items():
+            row = {**event_meta, "market_type": "moneyline", "line": 0.0,
+                   "side": side, "odds": odds, "max_limit": 0}
+            all_rows.append(row)
+
+        # Spreads: {"0.0": {"hdp": 0, "home": 2.11, "away": 1.806, "max": 900}, ...}
+        for line_val, spread_data in period_data.get("spreads", {}).items():
+            line_f = float(line_val)
+            max_limit = spread_data.get("max", 0)
+            for side in ("home", "away"):
+                if side in spread_data:
+                    row = {**event_meta, "market_type": "spread", "line": line_f,
+                           "side": side, "odds": spread_data[side], "max_limit": max_limit}
+                    all_rows.append(row)
+
+        # Totals: {"2.25": {"points": 2.25, "over": 1.813, "under": 2.07, "max": 675}, ...}
+        for line_val, total_data in period_data.get("totals", {}).items():
+            line_f = float(line_val)
+            max_limit = total_data.get("max", 0)
+            for side in ("over", "under"):
+                if side in total_data:
+                    row = {**event_meta, "market_type": "total", "line": line_f,
+                           "side": side, "odds": total_data[side], "max_limit": max_limit}
+                    all_rows.append(row)
+
+    if not all_rows:
+        return pd.DataFrame(columns=list(DTYPES_CURRENT.keys()))
+
+    df = pd.DataFrame(all_rows)
+    for col, dtype in DTYPES_CURRENT.items():
+        if col in df.columns:
+            if dtype == "category":
+                df[col] = df[col].astype("category")
+            else:
+                df[col] = df[col].astype(dtype)
+
+    col_order = [c for c in DTYPES_CURRENT if c in df.columns]
+    return df[col_order]
+
+
 def save_to_parquet(df: pd.DataFrame, path: str) -> None:
     """Save DataFrame to parquet with optimal compression."""
     df.to_parquet(
@@ -148,3 +232,4 @@ def save_to_parquet(df: pd.DataFrame, path: str) -> None:
         index=False,
         use_dictionary=["league_name", "home_team", "away_team", "market_type", "side"],
     )
+
