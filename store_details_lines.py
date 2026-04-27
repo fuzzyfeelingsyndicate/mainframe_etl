@@ -182,14 +182,14 @@ def extract_period0_current(api_response: dict) -> pd.DataFrame:
         }
 
         # Moneyline: {"home": 3, "draw": 3.15, "away": 2.58}
-        ml = period_data.get("money_line", {})
+        ml = period_data.get("money_line") or {}
         for side, odds in ml.items():
             row = {**event_meta, "market_type": "moneyline", "line": 0.0,
                    "side": side, "odds": odds, "max_limit": 0}
             all_rows.append(row)
 
         # Spreads: {"0.0": {"hdp": 0, "home": 2.11, "away": 1.806, "max": 900}, ...}
-        for line_val, spread_data in period_data.get("spreads", {}).items():
+        for line_val, spread_data in (period_data.get("spreads") or {}).items():
             line_f = float(line_val)
             max_limit = spread_data.get("max", 0)
             for side in ("home", "away"):
@@ -199,7 +199,7 @@ def extract_period0_current(api_response: dict) -> pd.DataFrame:
                     all_rows.append(row)
 
         # Totals: {"2.25": {"points": 2.25, "over": 1.813, "under": 2.07, "max": 675}, ...}
-        for line_val, total_data in period_data.get("totals", {}).items():
+        for line_val, total_data in (period_data.get("totals") or {}).items():
             line_f = float(line_val)
             max_limit = total_data.get("max", 0)
             for side in ("over", "under"):
