@@ -61,7 +61,8 @@ def get_event_details(event_id, sport_id):
     if not response.ok:
         print(f"[DEBUG] event_id={event_id} sport_id={sport_id} status={response.status_code} body={response.text[:300]}")
     response.raise_for_status()
-    return store_details_lines.extract_period0_history(response.json())
+    data = response.json()
+    return store_details_lines.extract_period0_current(data)
 
 
 def get_data():
@@ -75,7 +76,7 @@ def get_data():
         if starts.tzinfo is None:
             starts = starts.replace(tzinfo=timezone.utc)
         timedif = starts - timenow
-        if timedelta(minutes=-5) <= timedif <= timedelta(minutes=1110):
+        if timedelta(minutes=-5) <= timedif <= timedelta(minutes=1100):
             events.append({'event_id': event['event_id'], 'sport_id': event.get('sport_id', 1)})
     if not FOLDER_ID:
         raise RuntimeError("GOOGLE_DRIVE_FOLDER_ID env var is not set")
