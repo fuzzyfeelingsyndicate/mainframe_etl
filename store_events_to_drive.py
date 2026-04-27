@@ -73,10 +73,14 @@ def get_data():
         if starts.tzinfo is None:
             starts = starts.replace(tzinfo=timezone.utc)
         timedif = starts - timenow
-        if timedelta(0) <= timedif <= timedelta(minutes=20):
+        if timedelta(minutes=-5) <= timedif <= timedelta(minutes=20):
             events.append({'event_id': event['event_id'], 'sport_id': event.get('sport_id', 1)})
     if not FOLDER_ID:
         raise RuntimeError("GOOGLE_DRIVE_FOLDER_ID env var is not set")
+    print(f"[INFO] Total events in DB: {len(response)}, matched in window: {len(events)}, time now (UTC): {timenow.isoformat()}")
+    if not events:
+        print("[INFO] No events in the 20-minute window. Nothing to process.")
+        return
     for ev in events:
         event_id = ev['event_id']
         sport_id = ev['sport_id']
