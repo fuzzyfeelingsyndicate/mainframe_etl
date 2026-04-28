@@ -28,7 +28,7 @@ def post_to_slack(message: str):
 supabase_url = os.getenv("SUPABASE_URL")
 supabase_key = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(supabase_url, supabase_key)
-rapid_url = os.getenv("RAPID_URL")
+rapid_url = os.getenv("RAPID_URL_MARKETS")
 rapid_api_key = os.getenv("RAPID_API_KEY")
 rapid_api_host = os.getenv("RAPID_API_HOST")
 
