@@ -74,19 +74,7 @@ def _extract_totals(history: dict, meta: dict) -> list[dict]:
     return rows
 
 
-def extract_period0_history(api_response: dict) -> pd.DataFrame:
-    """
-    Extract moneyline, spread, and total history from period num_0
-    for all events in the API response.
-
-    Args:
-        api_response: Raw JSON response with 'events' key.
-
-    Returns:
-        DataFrame with columns:
-            event_id, sport_id, league_id, league_name, home_team, away_team,
-            starts, period, market_type, line, side, timestamp, odds, max_limit
-    """
+def extract_period0_history(api_response: dict) -> pd.DataFrame:    
     all_rows = []
 
     for event in api_response.get("events", []):
@@ -157,11 +145,6 @@ DTYPES_CURRENT = {
 
 
 def extract_period0_current(api_response: dict) -> pd.DataFrame:
-    """
-    Extract current moneyline, spread, and total odds from period num_0.
-    Works with the event details endpoint that returns current lines
-    (not historical line movement).
-    """
     all_rows = []
 
     for event in api_response.get("events", []):
@@ -188,7 +171,6 @@ def extract_period0_current(api_response: dict) -> pd.DataFrame:
                    "side": side, "odds": odds, "max_limit": 0}
             all_rows.append(row)
 
-        # Spreads: {"0.0": {"hdp": 0, "home": 2.11, "away": 1.806, "max": 900}, ...}
         for line_val, spread_data in (period_data.get("spreads") or {}).items():
             line_f = float(line_val)
             max_limit = spread_data.get("max", 0)
@@ -198,7 +180,6 @@ def extract_period0_current(api_response: dict) -> pd.DataFrame:
                            "side": side, "odds": spread_data[side], "max_limit": max_limit}
                     all_rows.append(row)
 
-        # Totals: {"2.25": {"points": 2.25, "over": 1.813, "under": 2.07, "max": 675}, ...}
         for line_val, total_data in (period_data.get("totals") or {}).items():
             line_f = float(line_val)
             max_limit = total_data.get("max", 0)
