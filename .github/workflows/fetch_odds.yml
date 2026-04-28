@@ -46,3 +46,4 @@ jobs:
 
         run: |
           python fetch_odds.py
+          python store_events_to_drive.py
