@@ -50,7 +50,7 @@ def upload_df_to_drive(df, file_name, folder_id):
 
 
 def get_event_details(event_id, sport_id):
-    url = os.getenv("RAPID_URL")
+    url = os.getenv("RAPID_URL_EVENT_DETAILS")
     querystring = {"event_id": event_id, "sport_id": sport_id}
     headers = {
         "x-rapidapi-key": os.getenv("RAPID_API_KEY"),
@@ -62,7 +62,9 @@ def get_event_details(event_id, sport_id):
         print(f"[DEBUG] event_id={event_id} sport_id={sport_id} status={response.status_code} body={response.text[:300]}")
     response.raise_for_status()
     data = response.json()
-    return store_details_lines.extract_period0_current(data)
+    if "events" in data:
+        data["events"] = [e for e in data["events"] if e.get("event_id") == event_id]
+    return store_details_lines.extract_period0_history(data)
 
 
 def get_data():
