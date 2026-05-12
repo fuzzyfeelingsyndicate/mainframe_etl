@@ -22,8 +22,10 @@ def get_drive_service():
 
 
 def list_parquet_files(service, folder_id):
-    query = f"'{folder_id}' in parents and name contains '.parquet' and name contains '2026' and trashed=false"
+    query = f"'{folder_id}' in parents and name contains '.parquet' and trashed=false"
     results = service.files().list(q=query, fields="files(id, name)").execute()
+    print(f"[DEBUG] Query: {query}")
+    print(f"[DEBUG] Found {len(results.get('files', []))} files")
     return results.get("files", [])
 
 
