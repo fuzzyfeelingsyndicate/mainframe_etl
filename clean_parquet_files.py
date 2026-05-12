@@ -23,9 +23,22 @@ def get_drive_service():
 
 def list_parquet_files(service, folder_id):
     query = f"'{folder_id}' in parents and name contains '.parquet' and trashed=false"
-    results = service.files().list(q=query, fields="files(id, name)").execute()
-    print(f"[DEBUG] Query: {query}")
-    print(f"[DEBUG] Found {len(results.get('files', []))} files")
+    all_files = []
+    page_token = None
+    while True:
+        results = service.files().list(
+            q=query,
+            spaces="drive",
+            fields="nextPageToken, files(id, name)",
+            pageSize=1000,
+            pageToken=page_token
+        ).execute()
+        all_files.extend(results.get("files", []))
+        page_token = results.get("nextPageToken")
+        if not page_token:
+            break
+    print(f"[DEBUG] Found {len(all_files)} parquet files in folder")
+    return all_files
     return results.get("files", [])
 
 
@@ -59,6 +72,7 @@ def delete_files(service, files):
 if __name__ == "__main__":
     if not FOLDER_ID:
         raise RuntimeError("GOOGLE_DRIVE_FOLDER_ID env var is not set")
+    print(f"[DEBUG] Using FOLDER_ID: {FOLDER_ID}")
 
     service = get_drive_service()
     files = list_parquet_files(service, FOLDER_ID)
