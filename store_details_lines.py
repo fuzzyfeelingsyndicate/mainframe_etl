@@ -83,7 +83,7 @@ def extract_period0_history(api_response: dict) -> pd.DataFrame:
         if not period_data:
             continue
 
-        history = period_data.get("history", {})
+        history = period_data.get("history") or {}
         meta = period_data.get("meta", {})
 
         event_meta = {
