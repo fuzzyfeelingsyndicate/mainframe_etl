@@ -22,7 +22,7 @@ def get_drive_service():
 
 
 def list_parquet_files(service, folder_id):
-    query = f"'{folder_id}' in parents and name contains '.parquet' and trashed=false"
+    query = f"'{folder_id}' in parents and name contains '2026' and name contains '.parquet' and trashed=false"
     all_files = []
     page_token = None
     while True:
@@ -37,9 +37,15 @@ def list_parquet_files(service, folder_id):
         page_token = results.get("nextPageToken")
         if not page_token:
             break
-    print(f"[DEBUG] Found {len(all_files)} parquet files in folder")
+    print(f"[DEBUG] Found {len(all_files)} 2026 parquet files in folder")
     return all_files
-    return results.get("files", [])
+
+
+def get_batch_file(service, folder_id):
+    query = f"'{folder_id}' in parents and name = 'batch.parquet' and trashed=false"
+    results = service.files().list(q=query, fields="files(id, name)").execute()
+    files = results.get("files", [])
+    return files[0] if files else None
 
 
 def download_file(service, file_id):
@@ -76,19 +82,24 @@ if __name__ == "__main__":
 
     service = get_drive_service()
     files = list_parquet_files(service, FOLDER_ID)
+    batch_file = get_batch_file(service, FOLDER_ID)
 
-    if not files:
+    dfs = []
+
+    if batch_file:
+        print(f"Reading existing batch.parquet")
+        dfs.append(pd.read_parquet(download_file(service, batch_file["id"])))
+
+    for f in files:
+        print(f"Reading {f['name']}")
+        dfs.append(pd.read_parquet(download_file(service, f["id"])))
+
+    if not dfs:
         print("No parquet files found in folder")
     else:
-        dfs = []
-        for f in files:
-            print(f"Reading {f['name']}")
-            buf = download_file(service, f["id"])
-            dfs.append(pd.read_parquet(buf))
+        batch = pd.concat(dfs, ignore_index=True).drop_duplicates().reset_index(drop=True)
+        upload_batch(service, FOLDER_ID, batch)
 
-        if not dfs:
-            print("No files to process")
-        else:
-            batch = pd.concat(dfs, ignore_index=True).drop_duplicates().reset_index(drop=True)
-            upload_batch(service, FOLDER_ID, batch)
-            delete_files(service, files)
+        if batch_file:
+            delete_files(service, [batch_file])
+        delete_files(service, files)
