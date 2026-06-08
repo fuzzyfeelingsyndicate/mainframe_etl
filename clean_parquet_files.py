@@ -81,6 +81,16 @@ if __name__ == "__main__":
     print(f"[DEBUG] Using FOLDER_ID: {FOLDER_ID}")
 
     service = get_drive_service()
+
+    # Debug: list ALL files in the folder to verify we're looking in the right place
+    debug_query = f"'{FOLDER_ID}' in parents and trashed=false"
+    debug_results = service.files().list(
+        q=debug_query, spaces="drive",
+        fields="files(id, name)", pageSize=20
+    ).execute()
+    debug_files = debug_results.get("files", [])
+    print(f"[DEBUG] All files in folder (first 20): {[f['name'] for f in debug_files]}")
+
     files = list_parquet_files(service, FOLDER_ID)
     batch_file = get_batch_file(service, FOLDER_ID)
 
