@@ -22,7 +22,7 @@ def get_drive_service():
 
 
 def list_parquet_files(service, folder_id):
-    query = f"'{folder_id}' in parents and name contains '2026' and name contains '.parquet' and trashed=false"
+    query = f"'{folder_id}' in parents and name contains '.parquet' and trashed=false"
     all_files = []
     page_token = None
     while True:
@@ -37,6 +37,8 @@ def list_parquet_files(service, folder_id):
         page_token = results.get("nextPageToken")
         if not page_token:
             break
+    # Filter client-side for 2026 files (Drive API 'contains' does token matching, not substring)
+    all_files = [f for f in all_files if "2026" in f["name"] and f["name"] != "batch.parquet"]
     print(f"[DEBUG] Found {len(all_files)} 2026 parquet files in folder")
     return all_files
 
