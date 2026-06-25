@@ -10,8 +10,6 @@ def cet_now():
 
 MAX_EVENT_AGE = timedelta(days=7)
 
-event_created = {}
-
 SLACK_WEBHOOK = os.getenv('SLACK_WEBHOOK')
 
 def post_to_slack(message: str):
@@ -24,7 +22,6 @@ def post_to_slack(message: str):
         print(f"Slack notification failed: {e}")
 
 
-
 supabase_url = os.getenv("SUPABASE_URL")
 supabase_key = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(supabase_url, supabase_key)
@@ -33,7 +30,12 @@ rapid_api_key = os.getenv("RAPID_API_KEY")
 rapid_api_host = os.getenv("RAPID_API_HOST")
 
 
-def upsert_event(events):
+def upsert_event(events, event_created: dict):
+    """
+    Upsert events into the database.
+    Uses a single upsert call instead of separate insert/update per row.
+    Populates event_created with the canonical created_at for each event.
+    """
     all_ids = [e["event_id"] for e in events["events"]]
 
     existing_rows = (
@@ -45,43 +47,48 @@ def upsert_event(events):
     existing_map = {r["event_id"]: r["created_at"] for r in existing_rows}
 
     now_cet = cet_now()
-    new_events = []
+    rows_to_upsert = []
 
     for event in events["events"]:
         event_id = event["event_id"]
-        if event_id not in existing_map:
-            new_events.append({
-                "event_id": event_id,
-                "sport_id": event["sport_id"],
-                "league_id": event["league_id"],
-                "league_name": event["league_name"],
-                "starts": event["starts"],
-                "home_team": event["home"],
-                "away_team": event["away"],
-                "created_at": now_cet.isoformat()
-            })
-            event_created[event_id] = now_cet
+        is_new = event_id not in existing_map
+
+        # Use the original created_at for existing events to preserve it
+        created_at = now_cet.isoformat() if is_new else existing_map[event_id]
+
+        rows_to_upsert.append({
+            "event_id": event_id,
+            "sport_id": event["sport_id"],
+            "league_id": event["league_id"],
+            "league_name": event["league_name"],
+            "starts": event["starts"],
+            "home_team": event["home"],
+            "away_team": event["away"],
+            "created_at": created_at,
+        })
+
+        # Populate in-memory created_at map
+        event_created[event_id] = (
+            now_cet if is_new
+            else datetime.fromisoformat(existing_map[event_id])
+        )
+
+        if is_new:
             post_to_slack(
-                f":sparkles: New event added: *{event['home']}* vs *{event['away']}* in *{event['league_name']}* — starts {event['starts']}"
+                f":sparkles: New event added: *{event['home']}* vs *{event['away']}*"
+                f" in *{event['league_name']}* — starts {event['starts']}"
             )
-        else:
-            event_created[event_id] = datetime.fromisoformat(existing_map[event_id])
-            supabase.table("events").update({
-                "sport_id": event["sport_id"],
-                "league_id": event["league_id"],
-                "league_name": event["league_name"],
-                "starts": event["starts"],
-                "home_team": event["home"],
-                "away_team": event["away"],
-            }).eq("event_id", event_id).execute()
 
-    if new_events:
-        supabase.table("events").insert(new_events).execute()
+    if rows_to_upsert:
+        supabase.table("events").upsert(
+            rows_to_upsert, on_conflict="event_id"
+        ).execute()
 
 
-market_cache = {}
-
-def load_markets(event_ids):
+def load_markets(event_ids: list, market_cache: dict):
+    """Load existing markets from DB into market_cache for the given event_ids."""
+    if not event_ids:
+        return
     rows = (
         supabase.table("markets")
         .select("market_id", "event_id", "line_id")
@@ -93,10 +100,12 @@ def load_markets(event_ids):
     for r in rows:
         market_cache[(r["event_id"], r["line_id"])] = r["market_id"]
 
-def load_latest_odds(market_ids):
+
+def load_latest_odds(market_ids: list) -> dict:
+    """Return the most recent price per (market_id, side) within the last hour."""
     if not market_ids:
         return {}
-    cutoff = (cet_now() - timedelta(hours=24)).isoformat()
+    cutoff = (cet_now() - timedelta(hours=1)).isoformat()
     rows = (
         supabase.table("odds_history")
         .select("market_id", "side", "price", "pulled_at")
@@ -112,11 +121,18 @@ def load_latest_odds(market_ids):
             seen[key] = r["price"]
     return seen
 
-def upsert_market(event, period):
+
+def upsert_market(event, period, event_created: dict, market_cache: dict):
+    """
+    Upsert a market row and return its market_id.
+    Returns None if the event is unknown or too old.
+    """
     event_id = event["event_id"]
+    now = cet_now()  # single call to avoid drift
+
     if event_id not in event_created:
         return None
-    if cet_now() - event_created[event_id] > MAX_EVENT_AGE:
+    if now - event_created[event_id] > MAX_EVENT_AGE:
         return None
 
     line_id = period["line_id"]
@@ -129,7 +145,7 @@ def upsert_market(event, period):
             "period_number": period["number"],
             "market_type": "money_line",
             "parameter": 0,
-            "created_at": cet_now().isoformat()
+            "created_at": now.isoformat(),
         }
         result = (
             supabase.table("markets")
@@ -141,11 +157,21 @@ def upsert_market(event, period):
 
     return market_cache[cache_key]
 
-def insert_odds(event_id, market_id, side, price, max_limit, latest_odds):
+
+def insert_odds(event_id, market_id, side, price, max_limit, latest_odds: dict, event_created: dict):
+    """Insert an odds record only if the price has changed since the last pull."""
+    now = cet_now()  # single call to avoid drift
+
     if event_id not in event_created:
         return
-    if cet_now() - event_created[event_id] > MAX_EVENT_AGE:
+    if now - event_created[event_id] > MAX_EVENT_AGE:
         return
+
+    # Guard against non-numeric prices (e.g. API wraps value in an object)
+    if not isinstance(price, (int, float)):
+        print(f"Unexpected price type for market_id={market_id} side={side}: {price!r}")
+        return
+
     if latest_odds.get((market_id, side)) == price:
         return
 
@@ -155,47 +181,67 @@ def insert_odds(event_id, market_id, side, price, max_limit, latest_odds):
         "side": side,
         "price": price,
         "max_limit": max_limit,
-        "pulled_at": cet_now().isoformat()
+        "pulled_at": now.isoformat(),
     }).execute()
 
 
 def process_event(events):
-    upsert_event(events)
+    """
+    Main processing pipeline for one API response batch.
+    State (event_created, market_cache) is local to this call so batches
+    across different sports don't bleed into each other.
+    """
+    # Isolate state per batch to avoid cross-sport contamination
+    event_created: dict = {}
+    market_cache: dict = {}
 
-    valid_ids = [e["event_id"] for e in events["events"] if e["event_id"] in event_created]
-    load_markets(valid_ids)
+    upsert_event(events, event_created)
 
+    # Only process events we have a created_at for (i.e. not silently dropped)
+    valid_ids = [
+        e["event_id"] for e in events["events"]
+        if e["event_id"] in event_created
+    ]
+
+    load_markets(valid_ids, market_cache)
+
+    # Load latest odds only for markets relevant to this batch
     market_ids = list(market_cache.values())
     latest_odds = load_latest_odds(market_ids)
 
     for event in events["events"]:
         event_id = event["event_id"]
-        for key, period in event.get("periods", {}).items():
+        for _key, period in event.get("periods", {}).items():
             if period.get("money_line") and period.get("number") == 0:
-                market_id = upsert_market(event, period)
+                market_id = upsert_market(event, period, event_created, market_cache)
                 if not market_id:
                     continue
-                for side, line in period["money_line"].items():
-                    insert_odds(event_id, market_id, side, line, period.get("max_limit", 0), latest_odds)
+                for side, price in period["money_line"].items():
+                    insert_odds(
+                        event_id, market_id, side, price,
+                        period.get("max_limit", 0),
+                        latest_odds, event_created
+                    )
 
-def get_active_leagues():
-    result = supabase.table("leagues")\
-        .select("league_id, sport_id")\
-        .eq("is_active", True)\
+
+def get_active_leagues() -> dict:
+    """Fetch active leagues from Supabase, grouped by sport_id."""
+    result = (
+        supabase.table("leagues")
+        .select("league_id, sport_id")
+        .eq("is_active", True)
         .execute()
-    
+    )
+
     if not result.data:
         post_to_slack(":warning: No active leagues found in database!")
         return {}
-    
 
-    leagues_by_sport = {}
+    leagues_by_sport: dict = {}
     for row in result.data:
         sport_id = row["sport_id"]
-        if sport_id not in leagues_by_sport:
-            leagues_by_sport[sport_id] = []
-        leagues_by_sport[sport_id].append(row["league_id"])
-    
+        leagues_by_sport.setdefault(sport_id, []).append(str(row["league_id"]))
+
     return leagues_by_sport
 
 
@@ -203,26 +249,26 @@ if __name__ == "__main__":
     api_url = rapid_url
     headers = {
         "x-rapidapi-key": rapid_api_key,
-        "x-rapidapi-host": rapid_api_host
+        "x-rapidapi-host": rapid_api_host,
     }
-    
+
     leagues_by_sport = get_active_leagues()
-    
+
     if not leagues_by_sport:
         print("No active leagues configured. Exiting.")
         raise SystemExit(0)
-    
+
     for sport_id, league_ids in leagues_by_sport.items():
         league_ids_str = ",".join(league_ids)
         querystring = {
             "league_ids": league_ids_str,
             "event_type": "prematch",
             "sport_id": sport_id,
-            "is_have_odds": "true"
+            "is_have_odds": "true",
         }
-        
+
         print(f"Fetching odds for sport_id={sport_id}, leagues: {league_ids_str}")
-        
+
         try:
             response = requests.get(api_url, headers=headers, params=querystring, timeout=30)
             response.raise_for_status()
