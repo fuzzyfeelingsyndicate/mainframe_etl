@@ -178,21 +178,57 @@ def process_event(events):
                 for side, line in period["money_line"].items():
                     insert_odds(event_id, market_id, side, line, period.get("max_limit", 0), latest_odds)
 
+def get_active_leagues():
+    result = supabase.table("leagues")\
+        .select("league_id, sport_id")\
+        .eq("is_active", True)\
+        .execute()
+    
+    if not result.data:
+        post_to_slack(":warning: No active leagues found in database!")
+        return {}
+    
+
+    leagues_by_sport = {}
+    for row in result.data:
+        sport_id = row["sport_id"]
+        if sport_id not in leagues_by_sport:
+            leagues_by_sport[sport_id] = []
+        leagues_by_sport[sport_id].append(row["league_id"])
+    
+    return leagues_by_sport
+
 
 if __name__ == "__main__":
     api_url = rapid_url
-    querystring = {"league_ids": "2686,2438,199868,200813,1740,217401,217399,212572,212576,217400,217562,199211,200201,1978,1952,1951,2037", "event_type": "prematch", "sport_id": "1", "is_have_odds": "true"}
     headers = {
         "x-rapidapi-key": rapid_api_key,
         "x-rapidapi-host": rapid_api_host
     }
-
-    try:
-        response = requests.get(api_url, headers=headers, params=querystring, timeout=30)
-        response.raise_for_status()
-        event_list = response.json()
-    except requests.RequestException as e:
-        print(f"API request failed: {e}")
-        raise SystemExit(1)
-
-    process_event(event_list)
+    
+    leagues_by_sport = get_active_leagues()
+    
+    if not leagues_by_sport:
+        print("No active leagues configured. Exiting.")
+        raise SystemExit(0)
+    
+    for sport_id, league_ids in leagues_by_sport.items():
+        league_ids_str = ",".join(league_ids)
+        querystring = {
+            "league_ids": league_ids_str,
+            "event_type": "prematch",
+            "sport_id": sport_id,
+            "is_have_odds": "true"
+        }
+        
+        print(f"Fetching odds for sport_id={sport_id}, leagues: {league_ids_str}")
+        
+        try:
+            response = requests.get(api_url, headers=headers, params=querystring, timeout=30)
+            response.raise_for_status()
+            event_list = response.json()
+            process_event(event_list)
+        except requests.RequestException as e:
+            print(f"API request failed for sport_id={sport_id}: {e}")
+            post_to_slack(f":x: Failed to fetch odds for sport_id={sport_id}: {e}")
+            continue
