@@ -31,6 +31,19 @@ rapid_api_key = os.getenv("RAPID_API_KEY")
 rapid_api_host = os.getenv("RAPID_API_HOST")
 
 
+def parse_event_start_time(starts_str: str) -> datetime:
+    """
+    Parse event start time string and ensure it's timezone-aware (CET).
+    Handles both timezone-naive and timezone-aware ISO format strings.
+    """
+    starts_dt = datetime.fromisoformat(starts_str.replace('Z', '+00:00'))
+    if starts_dt.tzinfo is None:
+        # If naive, assume UTC and convert to CET
+        starts_dt = starts_dt.replace(tzinfo=ZoneInfo("UTC"))
+    # Convert to CET for consistency
+    return starts_dt.astimezone(ZoneInfo("Europe/Berlin"))
+
+
 def upsert_event(events, event_created: dict, event_starts: dict):
     """
     Upsert events into the database.
@@ -75,8 +88,8 @@ def upsert_event(events, event_created: dict, event_starts: dict):
             else datetime.fromisoformat(existing_map[event_id]["created_at"])
         )
         
-        # Populate event start time for age checking
-        event_starts[event_id] = datetime.fromisoformat(event["starts"])
+        # Populate event start time for age checking (ensure timezone-aware)
+        event_starts[event_id] = parse_event_start_time(event["starts"])
 
         if is_new:
             post_to_slack(
