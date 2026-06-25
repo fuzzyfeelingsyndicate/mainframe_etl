@@ -4,7 +4,9 @@ concurrency:
   group: fetch-odds-etl
   cancel-in-progress: true
 on:
-  workflow_dispatch:        
+  schedule:
+    - cron: '*/15 * * * *'  # Every 15 minutes
+  workflow_dispatch:  # Keep manual trigger option        
 
 jobs:
   run-script:

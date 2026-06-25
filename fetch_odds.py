@@ -8,7 +8,8 @@ from zoneinfo import ZoneInfo
 def cet_now():
     return datetime.now(ZoneInfo("Europe/Berlin"))
 
-MAX_EVENT_AGE = timedelta(days=7)
+# Stop tracking odds 24 hours after event starts
+MAX_HOURS_AFTER_START = timedelta(hours=24)
 
 SLACK_WEBHOOK = os.getenv('SLACK_WEBHOOK')
 
@@ -30,21 +31,22 @@ rapid_api_key = os.getenv("RAPID_API_KEY")
 rapid_api_host = os.getenv("RAPID_API_HOST")
 
 
-def upsert_event(events, event_created: dict):
+def upsert_event(events, event_created: dict, event_starts: dict):
     """
     Upsert events into the database.
     Uses a single upsert call instead of separate insert/update per row.
     Populates event_created with the canonical created_at for each event.
+    Populates event_starts with the event start time for age checking.
     """
     all_ids = [e["event_id"] for e in events["events"]]
 
     existing_rows = (
         supabase.table("events")
-        .select("event_id", "created_at")
+        .select("event_id", "created_at", "starts")
         .in_("event_id", all_ids)
         .execute()
     ).data
-    existing_map = {r["event_id"]: r["created_at"] for r in existing_rows}
+    existing_map = {r["event_id"]: {"created_at": r["created_at"], "starts": r["starts"]} for r in existing_rows}
 
     now_cet = cet_now()
     rows_to_upsert = []
@@ -54,7 +56,7 @@ def upsert_event(events, event_created: dict):
         is_new = event_id not in existing_map
 
         # Use the original created_at for existing events to preserve it
-        created_at = now_cet.isoformat() if is_new else existing_map[event_id]
+        created_at = now_cet.isoformat() if is_new else existing_map[event_id]["created_at"]
 
         rows_to_upsert.append({
             "event_id": event_id,
@@ -70,8 +72,11 @@ def upsert_event(events, event_created: dict):
         # Populate in-memory created_at map
         event_created[event_id] = (
             now_cet if is_new
-            else datetime.fromisoformat(existing_map[event_id])
+            else datetime.fromisoformat(existing_map[event_id]["created_at"])
         )
+        
+        # Populate event start time for age checking
+        event_starts[event_id] = datetime.fromisoformat(event["starts"])
 
         if is_new:
             post_to_slack(
@@ -122,17 +127,19 @@ def load_latest_odds(market_ids: list) -> dict:
     return seen
 
 
-def upsert_market(event, period, event_created: dict, market_cache: dict):
+def upsert_market(event, period, event_starts: dict, market_cache: dict):
     """
     Upsert a market row and return its market_id.
-    Returns None if the event is unknown or too old.
+    Returns None if the event has already finished (>24h after start).
     """
     event_id = event["event_id"]
     now = cet_now()  # single call to avoid drift
 
-    if event_id not in event_created:
+    if event_id not in event_starts:
         return None
-    if now - event_created[event_id] > MAX_EVENT_AGE:
+    
+    # Stop tracking odds 24 hours after the event starts
+    if now - event_starts[event_id] > MAX_HOURS_AFTER_START:
         return None
 
     line_id = period["line_id"]
@@ -158,13 +165,15 @@ def upsert_market(event, period, event_created: dict, market_cache: dict):
     return market_cache[cache_key]
 
 
-def insert_odds(event_id, market_id, side, price, max_limit, latest_odds: dict, event_created: dict):
+def insert_odds(event_id, market_id, side, price, max_limit, latest_odds: dict, event_starts: dict):
     """Insert an odds record only if the price has changed since the last pull."""
     now = cet_now()  # single call to avoid drift
 
-    if event_id not in event_created:
+    if event_id not in event_starts:
         return
-    if now - event_created[event_id] > MAX_EVENT_AGE:
+    
+    # Stop tracking odds 24 hours after the event starts
+    if now - event_starts[event_id] > MAX_HOURS_AFTER_START:
         return
 
     # Guard against non-numeric prices (e.g. API wraps value in an object)
@@ -188,14 +197,15 @@ def insert_odds(event_id, market_id, side, price, max_limit, latest_odds: dict, 
 def process_event(events):
     """
     Main processing pipeline for one API response batch.
-    State (event_created, market_cache) is local to this call so batches
-    across different sports don't bleed into each other.
+    State (event_created, event_starts, market_cache) is local to this call 
+    so batches across different sports don't bleed into each other.
     """
     # Isolate state per batch to avoid cross-sport contamination
     event_created: dict = {}
+    event_starts: dict = {}
     market_cache: dict = {}
 
-    upsert_event(events, event_created)
+    upsert_event(events, event_created, event_starts)
 
     # Only process events we have a created_at for (i.e. not silently dropped)
     valid_ids = [
@@ -213,14 +223,14 @@ def process_event(events):
         event_id = event["event_id"]
         for _key, period in event.get("periods", {}).items():
             if period.get("money_line") and period.get("number") == 0:
-                market_id = upsert_market(event, period, event_created, market_cache)
+                market_id = upsert_market(event, period, event_starts, market_cache)
                 if not market_id:
                     continue
                 for side, price in period["money_line"].items():
                     insert_odds(
                         event_id, market_id, side, price,
                         period.get("max_limit", 0),
-                        latest_odds, event_created
+                        latest_odds, event_starts
                     )
 
 
