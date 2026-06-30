@@ -233,18 +233,46 @@ def process_event(events):
     latest_odds = load_latest_odds(market_ids)
 
     for event in events["events"]:
-        event_id = event["event_id"]
-        for _key, period in event.get("periods", {}).items():
-            if period.get("money_line") and period.get("number") == 0:
-                market_id = upsert_market(event, period, event_starts, market_cache)
-                if not market_id:
-                    continue
-                for side, price in period["money_line"].items():
-                    insert_odds(
-                        event_id, market_id, side, price,
-                        period.get("max_limit", 0),
-                        latest_odds, event_starts
-                    )
+    event_id = event["event_id"]
+
+    for _, period in event.get("periods", {}).items():
+
+        # Only process the full game moneyline
+        if period.get("number") != 0:
+            continue
+
+        moneyline = period.get("money_line")
+        if not moneyline:
+            continue
+
+        market_id = upsert_market(
+            event,
+            period,
+            event_starts,
+            market_cache
+        )
+
+        if not market_id:
+            continue
+
+        # Football exposes max_limit directly.
+        # Basketball exposes it under meta.max_money_line.
+        max_limit = (
+            period.get("max_limit")
+            or period.get("meta", {}).get("max_money_line")
+            or 0
+        )
+
+        for side, price in moneyline.items():
+            insert_odds(
+                event_id=event_id,
+                market_id=market_id,
+                side=side,
+                price=price,
+                max_limit=max_limit,
+                latest_odds=latest_odds,
+                event_starts=event_starts,
+            )
 
 
 def get_active_leagues() -> dict:
