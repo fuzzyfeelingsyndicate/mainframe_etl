@@ -8,10 +8,12 @@ from zoneinfo import ZoneInfo
 def cet_now():
     return datetime.now(ZoneInfo("Europe/Berlin"))
 
+
 # Stop tracking odds 24 hours after event starts
 MAX_HOURS_AFTER_START = timedelta(hours=24)
 
-SLACK_WEBHOOK = os.getenv('SLACK_WEBHOOK')
+SLACK_WEBHOOK = os.getenv("SLACK_WEBHOOK")
+
 
 def post_to_slack(message: str):
     if not SLACK_WEBHOOK:
@@ -36,7 +38,7 @@ def parse_event_start_time(starts_str: str) -> datetime:
     Parse event start time string and ensure it's timezone-aware (CET).
     Handles both timezone-naive and timezone-aware ISO format strings.
     """
-    starts_dt = datetime.fromisoformat(starts_str.replace('Z', '+00:00'))
+    starts_dt = datetime.fromisoformat(starts_str.replace("Z", "+00:00"))
     if starts_dt.tzinfo is None:
         # If naive, assume UTC and convert to CET
         starts_dt = starts_dt.replace(tzinfo=ZoneInfo("UTC"))
@@ -59,7 +61,10 @@ def upsert_event(events, event_created: dict, event_starts: dict):
         .in_("event_id", all_ids)
         .execute()
     ).data
-    existing_map = {r["event_id"]: {"created_at": r["created_at"], "starts": r["starts"]} for r in existing_rows}
+    existing_map = {
+        r["event_id"]: {"created_at": r["created_at"], "starts": r["starts"]}
+        for r in existing_rows
+    }
 
     now_cet = cet_now()
     rows_to_upsert = []
@@ -69,25 +74,30 @@ def upsert_event(events, event_created: dict, event_starts: dict):
         is_new = event_id not in existing_map
 
         # Use the original created_at for existing events to preserve it
-        created_at = now_cet.isoformat() if is_new else existing_map[event_id]["created_at"]
+        created_at = (
+            now_cet.isoformat() if is_new else existing_map[event_id]["created_at"]
+        )
 
-        rows_to_upsert.append({
-            "event_id": event_id,
-            "sport_id": event["sport_id"],
-            "league_id": event["league_id"],
-            "league_name": event["league_name"],
-            "starts": event["starts"],
-            "home_team": event["home"],
-            "away_team": event["away"],
-            "created_at": created_at,
-        })
+        rows_to_upsert.append(
+            {
+                "event_id": event_id,
+                "sport_id": event["sport_id"],
+                "league_id": event["league_id"],
+                "league_name": event["league_name"],
+                "starts": event["starts"],
+                "home_team": event["home"],
+                "away_team": event["away"],
+                "created_at": created_at,
+            }
+        )
 
         # Populate in-memory created_at map
         event_created[event_id] = (
-            now_cet if is_new
+            now_cet
+            if is_new
             else datetime.fromisoformat(existing_map[event_id]["created_at"])
         )
-        
+
         # Populate event start time for age checking (ensure timezone-aware)
         event_starts[event_id] = parse_event_start_time(event["starts"])
 
@@ -150,7 +160,7 @@ def upsert_market(event, period, event_starts: dict, market_cache: dict):
 
     if event_id not in event_starts:
         return None
-    
+
     # Stop tracking odds 24 hours after the event starts
     if now - event_starts[event_id] > MAX_HOURS_AFTER_START:
         return None
@@ -178,13 +188,15 @@ def upsert_market(event, period, event_starts: dict, market_cache: dict):
     return market_cache[cache_key]
 
 
-def insert_odds(event_id, market_id, side, price, max_limit, latest_odds: dict, event_starts: dict):
+def insert_odds(
+    event_id, market_id, side, price, max_limit, latest_odds: dict, event_starts: dict
+):
     """Insert an odds record only if the price has changed since the last pull."""
     now = cet_now()  # single call to avoid drift
 
     if event_id not in event_starts:
         return
-    
+
     # Stop tracking odds 24 hours after the event starts
     if now - event_starts[event_id] > MAX_HOURS_AFTER_START:
         return
@@ -197,20 +209,22 @@ def insert_odds(event_id, market_id, side, price, max_limit, latest_odds: dict, 
     if latest_odds.get((market_id, side)) == price:
         return
 
-    supabase.table("odds_history").insert({
-        "event_id": event_id,
-        "market_id": market_id,
-        "side": side,
-        "price": price,
-        "max_limit": max_limit,
-        "pulled_at": now.isoformat(),
-    }).execute()
+    supabase.table("odds_history").insert(
+        {
+            "event_id": event_id,
+            "market_id": market_id,
+            "side": side,
+            "price": price,
+            "max_limit": max_limit,
+            "pulled_at": now.isoformat(),
+        }
+    ).execute()
 
 
 def process_event(events):
     """
     Main processing pipeline for one API response batch.
-    State (event_created, event_starts, market_cache) is local to this call 
+    State (event_created, event_starts, market_cache) is local to this call
     so batches across different sports don't bleed into each other.
     """
     # Isolate state per batch to avoid cross-sport contamination
@@ -222,8 +236,7 @@ def process_event(events):
 
     # Only process events we have a created_at for (i.e. not silently dropped)
     valid_ids = [
-        e["event_id"] for e in events["events"]
-        if e["event_id"] in event_created
+        e["event_id"] for e in events["events"] if e["event_id"] in event_created
     ]
 
     load_markets(valid_ids, market_cache)
@@ -233,46 +246,41 @@ def process_event(events):
     latest_odds = load_latest_odds(market_ids)
 
     for event in events["events"]:
-    event_id = event["event_id"]
+        event_id = event["event_id"]
 
-    for _, period in event.get("periods", {}).items():
+        for _, period in event.get("periods", {}).items():
 
-        # Only process the full game moneyline
-        if period.get("number") != 0:
-            continue
+            # Only process the full game moneyline
+            if period.get("number") != 0:
+                continue
 
-        moneyline = period.get("money_line")
-        if not moneyline:
-            continue
+            moneyline = period.get("money_line")
+            if not moneyline:
+                continue
 
-        market_id = upsert_market(
-            event,
-            period,
-            event_starts,
-            market_cache
-        )
+            market_id = upsert_market(event, period, event_starts, market_cache)
 
-        if not market_id:
-            continue
+            if not market_id:
+                continue
 
-        # Football exposes max_limit directly.
-        # Basketball exposes it under meta.max_money_line.
-        max_limit = (
-            period.get("max_limit")
-            or period.get("meta", {}).get("max_money_line")
-            or 0
-        )
-
-        for side, price in moneyline.items():
-            insert_odds(
-                event_id=event_id,
-                market_id=market_id,
-                side=side,
-                price=price,
-                max_limit=max_limit,
-                latest_odds=latest_odds,
-                event_starts=event_starts,
+            # Football exposes max_limit directly.
+            # Basketball exposes it under meta.max_money_line.
+            max_limit = (
+                period.get("max_limit")
+                or period.get("meta", {}).get("max_money_line")
+                or 0
             )
+
+            for side, price in moneyline.items():
+                insert_odds(
+                    event_id=event_id,
+                    market_id=market_id,
+                    side=side,
+                    price=price,
+                    max_limit=max_limit,
+                    latest_odds=latest_odds,
+                    event_starts=event_starts,
+                )
 
 
 def get_active_leagues() -> dict:
@@ -321,7 +329,9 @@ if __name__ == "__main__":
         print(f"Fetching odds for sport_id={sport_id}, leagues: {league_ids_str}")
 
         try:
-            response = requests.get(api_url, headers=headers, params=querystring, timeout=30)
+            response = requests.get(
+                api_url, headers=headers, params=querystring, timeout=30
+            )
             response.raise_for_status()
             event_list = response.json()
             process_event(event_list)
