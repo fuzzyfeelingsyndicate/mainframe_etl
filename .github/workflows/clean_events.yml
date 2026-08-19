@@ -18,6 +18,14 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-cevnts-${{ hashFiles('requirements_cevnts.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-cevnts-
+
       - name: Install dependencies
         run: pip install -r requirements_cevnts.txt
 
