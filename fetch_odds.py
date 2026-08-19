@@ -304,7 +304,56 @@ def get_active_leagues() -> dict:
     return leagues_by_sport
 
 
+# ---------------------------------------------------------------------------
+# API THROTTLE: only fetch from Pinnacle if last pull was >= FETCH_INTERVAL ago.
+# The workflow runs every 15 min (to keep store_events_to_drive.py happy),
+# but we only want to hit the API once per hour to save quota.
+# ---------------------------------------------------------------------------
+FETCH_INTERVAL = timedelta(hours=1)
+
+
+def should_fetch_now() -> bool:
+    """
+    Returns True if enough time has passed since the last odds fetch.
+    Checks the most recent pulled_at in odds_history.
+    Returns True if no records exist (first run).
+    """
+    try:
+        result = (
+            supabase.table("odds_history")
+            .select("pulled_at")
+            .order("pulled_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if not result.data:
+            print("[THROTTLE] No previous fetch found — fetching now.")
+            return True
+
+        last_pulled_str = result.data[0]["pulled_at"]
+        last_pulled = datetime.fromisoformat(last_pulled_str.replace("Z", "+00:00"))
+        # Normalise to CET for comparison
+        last_pulled_cet = last_pulled.astimezone(ZoneInfo("Europe/Berlin"))
+        elapsed = cet_now() - last_pulled_cet
+
+        if elapsed >= FETCH_INTERVAL:
+            print(f"[THROTTLE] Last fetch was {elapsed} ago — fetching now.")
+            return True
+        else:
+            remaining = FETCH_INTERVAL - elapsed
+            print(f"[THROTTLE] Last fetch was {elapsed} ago (< 1h). Skipping. Next fetch in ~{remaining}.")
+            return False
+    except Exception as e:
+        # If check fails, default to fetching (fail open)
+        print(f"[THROTTLE] Could not check last fetch time: {e} — fetching anyway.")
+        return True
+
+
 if __name__ == "__main__":
+    # Throttle: skip API call if odds were fetched less than 1 hour ago
+    if not should_fetch_now():
+        raise SystemExit(0)
+
     api_url = rapid_url
     headers = {
         "x-rapidapi-key": rapid_api_key,
